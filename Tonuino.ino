@@ -552,13 +552,13 @@ void playShortCut(uint8_t shortCut) {
 }
 
 void loop() {
-  do {
+
     checkStandbyAtMillis();
     mp3.loop();
     // Buttons werden nun über JS_Button gehandelt, dadurch kann jede Taste
     // doppelt belegt werden
     readButtons();
-
+  
     // admin menu
     if ((pauseButton.pressedFor(LONG_PRESS) || upButton.pressedFor(LONG_PRESS) || downButton.pressedFor(LONG_PRESS)) && pauseButton.isPressed() && upButton.isPressed() && downButton.isPressed()) {
       mp3.pause();
@@ -567,9 +567,9 @@ void loop() {
       } while (pauseButton.isPressed() || upButton.isPressed() || downButton.isPressed());
       readButtons();
       adminMenu();
-      break;
+      return;
     }
-
+  
     if (pauseButton.wasReleased()) {
       if (ignorePauseButton == false)
         if (isPlaying()) {
@@ -602,7 +602,7 @@ void loop() {
       }
       ignorePauseButton = true;
     }
-
+  
     if (upButton.pressedFor(LONG_PRESS)) {
       if (isPlaying()) {
         if (!mySettings.invertVolumeButtons) {
@@ -626,7 +626,7 @@ void loop() {
         }
       ignoreUpButton = false;
     }
-
+  
     if (downButton.pressedFor(LONG_PRESS)) {
       if (isPlaying()) {
         if (!mySettings.invertVolumeButtons) {
@@ -652,28 +652,24 @@ void loop() {
       ignoreDownButton = false;
     }
     // Ende der Buttons
-  } while (!mfrc522.PICC_IsNewCardPresent());
-
-  // RFID Karte wurde aufgelegt
-
-  if (!mfrc522.PICC_ReadCardSerial())
-    return;
-
-  if (readCard(&myCard) == true) {
+  
+  if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
     // make random a little bit more "random"
     randomSeed(millis() + random(1000));
-    if (myCard.cookie == 322417479 && myFolder->folder != 0 && myFolder->mode != 0) {
-      playFolder();
+    if (readCard(&myCard))
+    {
+      if (myCard.cookie == 322417479 && myFolder->folder != 0 && myFolder->mode != 0) {
+        playFolder();
+      }         
+      else { 
+        // Neue Karte konfigurieren
+        knownCard = false;
+        setupCard();
+      }
     }
-
-    // Neue Karte konfigurieren
-    else {
-      knownCard = false;
-      setupCard();
-    }
-  }
-  mfrc522.PICC_HaltA();
-  mfrc522.PCD_StopCrypto1();
+    mfrc522.PICC_HaltA();
+    mfrc522.PCD_StopCrypto1();
+  }  
 }
 
 void adminMenu() {
