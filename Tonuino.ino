@@ -344,20 +344,20 @@ void disablestandbyTimer() {
 
 void powerOff()
 {
-    Serial.println(F("=== power off!"));
-    // enter sleep state
-    digitalWrite(shutdownPin, HIGH);
-    delay(500);
+  Serial.println(F("=== power off!"));
+  // enter sleep state
+  digitalWrite(shutdownPin, HIGH);
+  delay(500);
 
-    // http://discourse.voss.earth/t/intenso-s10000-powerbank-automatische-abschaltung-software-only/805
-    // powerdown to 27mA (powerbank switches off after 30-60s)
-    mfrc522.PCD_AntennaOff();
-    mfrc522.PCD_SoftPowerDown();
-    mp3.sleep();
+  // http://discourse.voss.earth/t/intenso-s10000-powerbank-automatische-abschaltung-software-only/805
+  // powerdown to 27mA (powerbank switches off after 30-60s)
+  mfrc522.PCD_AntennaOff();
+  mfrc522.PCD_SoftPowerDown();
+  mp3.sleep();
 
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-    cli();  // Disable interrupts
-    sleep_mode();
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+  cli();  // Disable interrupts
+  sleep_mode();
 }
 
 void checkStandbyAtMillis() {
@@ -614,6 +614,99 @@ void playShortCut(uint8_t shortCut) {
     Serial.println(F("Shortcut not configured!"));
 }
 
+
+static bool hasCard = false;
+
+static byte lastCardUid[4];
+static byte retries;
+static bool lastCardWasUL;
+
+
+const byte PCS_NO_CHANGE	 = 0; // no change detected since last pollCard() call
+const byte PCS_NEW_CARD 	 = 1; // card with new UID detected (had no card or other card before)
+const byte PCS_CARD_GONE     = 2;// card is not reachable anymore
+const byte PCS_CARD_IS_BACK  = 3;// card was gone, and is now back again
+
+
+byte pollCard()
+{
+	const byte maxRetries = 2;
+
+	if (!hasCard)
+    {
+		if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial() && readCard(myCard))
+        {
+          bool bSameUID = !memcmp(lastCardUid, mfrc522.uid.uidByte, 4);
+          Serial.print(F("IsSameAsLastUID="));
+          Serial.println(bSameUID);
+          // store info about current card
+          memcpy(lastCardUid, mfrc522.uid.uidByte, 4);
+          lastCardWasUL = mfrc522.PICC_GetType(mfrc522.uid.sak) == MFRC522::PICC_TYPE_MIFARE_UL;
+        
+          retries = maxRetries;
+          hasCard = true;
+          return bSameUID ? PCS_CARD_IS_BACK : PCS_NEW_CARD;
+        }
+        return PCS_NO_CHANGE;
+    }
+	else // hasCard
+	{
+        // perform a dummy read command just to see whether the card is in range
+		byte buffer[18];
+		byte size = sizeof(buffer);
+		
+		if (mfrc522.MIFARE_Read(lastCardWasUL ? 8 : blockAddr, buffer, &size) != MFRC522::STATUS_OK)
+        {
+			if (retries > 0)
+            {
+				retries--;
+			}
+			else
+            {
+				Serial.println(F("card gone"));
+				mfrc522.PICC_HaltA();
+				mfrc522.PCD_StopCrypto1();
+				hasCard = false;
+				return PCS_CARD_GONE;
+            }
+        }
+        else
+        {
+            retries = maxRetries;
+        }
+    }
+	return PCS_NO_CHANGE;
+}
+
+void handleCardReader()
+{
+  // poll card only every 100ms
+  static uint8_t lastCardPoll = 0;
+  uint8_t now = millis();
+  
+  if (static_cast<uint8_t>(now - lastCardPoll) > 100)
+  {
+    lastCardPoll = now;
+    switch (pollCard())
+    {
+    case PCS_NEW_CARD:
+      onNewCard();
+      break;
+      
+    case PCS_CARD_GONE:
+      mp3.pause();
+      setstandbyTimer();
+      break;
+      
+    case PCS_CARD_IS_BACK:
+      mp3.start();
+      disablestandbyTimer();
+      break;
+    }    
+  }
+}
+
+
 void loop() {
 
   checkStandbyAtMillis();
@@ -647,7 +740,7 @@ void loop() {
   switch (btnEvPrev)
   {
   case BTN_SHORT_PRESS: Serial.println(F("Prev short")); previousButton();   break;
-  case BTN_LONG_PRESS:  Serial.println(F("Prev long")); mp3.playAdvertisement(2); break;
+  case BTN_LONG_PRESS:  Serial.println(F("Prev long"));                      break;
   }
   switch (btnEvNext)
   {
@@ -655,27 +748,21 @@ void loop() {
   case BTN_LONG_PRESS:  Serial.println(F("Next long"));                      break;
   }
   // Ende der Buttons
-  
-  if (mfrc522.PICC_IsNewCardPresent())  // RFID Karte wurde aufgelegt
-  {
-    if (mfrc522.PICC_ReadCardSerial())
-    {
-      if (readCard(&myCard))
-      {
-        if (myCard.cookie == cardCookie && myFolder->folder != 0 && myFolder->mode != Uninitialized) {
-          randomSeed(millis()); // make random a little bit more "random"
-          playFolder();
-        }
-        else { 
-		  // Neue Karte konfigurieren
-          knownCard = false;
-          setupCard();
-        }
-      }
-      mfrc522.PICC_HaltA();
-      mfrc522.PCD_StopCrypto1();
-    }
-  }  
+
+  handleCardReader();
+}
+
+void onNewCard()
+{    
+  if (myCard.cookie == cardCookie && myFolder->folder != 0 && myFolder->mode != Uninitialized) {
+    randomSeed(millis()); // make random a little bit more "random"
+    playFolder();
+  }
+  else { 
+	  // Neue Karte konfigurieren
+    knownCard = false;
+    setupCard();
+  }
 }
 
 void adminMenu() {
@@ -924,7 +1011,7 @@ void setupCard() {
   writeCard(myCard);
 }
 
-bool readCard(nfcTagObject * nfcTag) {
+bool readCard(nfcTagObject& nfcTag) {
   // Show some details of the PICC (that is: the tag/card)
   Serial.print(F("Card UID:"));
   dump_byte_array(mfrc522.uid.uidByte, mfrc522.uid.size);
@@ -996,19 +1083,19 @@ bool readCard(nfcTagObject * nfcTag) {
   tempCookie += (uint32_t)buffer[2] << 8;
   tempCookie += (uint32_t)buffer[3];
 
-  nfcTag->cookie = tempCookie;
-  nfcTag->version = buffer[4];
-  nfcTag->nfcFolderSettings.folder = buffer[5];
-  nfcTag->nfcFolderSettings.mode = buffer[6];
-  nfcTag->nfcFolderSettings.special = buffer[7];
-  nfcTag->nfcFolderSettings.special2 = buffer[8];
+  nfcTag.cookie = tempCookie;
+  nfcTag.version = buffer[4];
+  nfcTag.nfcFolderSettings.folder = buffer[5];
+  nfcTag.nfcFolderSettings.mode = buffer[6];
+  nfcTag.nfcFolderSettings.special = buffer[7];
+  nfcTag.nfcFolderSettings.special2 = buffer[8];
 
-  myFolder = &nfcTag->nfcFolderSettings;
+  myFolder = &nfcTag.nfcFolderSettings;
 
   return true;
 }
 
-void writeCard(nfcTagObject nfcTag) {
+void writeCard(nfcTagObject& nfcTag) {
   byte buffer[16] = {0x13, 0x37, 0xb3, 0x47, // 0x1337 0xb347 magic cookie to
                      // identify our nfc tags
                      0x02,                   // version 1
