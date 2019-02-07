@@ -316,20 +316,14 @@ const byte blockAddr = 4;
 const byte trailerBlock = 7;
 MFRC522::StatusCode status;
 
-#define buttonPause A0
-#define buttonUp A1
-#define buttonDown A2
+#define pinButtonPrev A0
+#define pinButtonNext A1
+#define pinButtonVolP A2
+#define pinButtonVolM A3
 #define busyPin 4
 #define shutdownPin 7
 
 #define LONG_PRESS 1000
-
-Button pauseButton(buttonPause);
-Button upButton(buttonUp);
-Button downButton(buttonDown);
-bool ignorePauseButton = false;
-bool ignoreUpButton = false;
-bool ignoreDownButton = false;
 
 
 /// Funktionen für den Standby Timer (z.B. über Pololu-Switch oder Mosfet)
@@ -370,6 +364,48 @@ void checkStandbyAtMillis() {
   if (sleepAtMillis != 0 && millis() > sleepAtMillis)
     powerOff();
 }
+
+
+const byte BTN_NO_PRESS    = 0; // nothing happened
+const byte BTN_SHORT_PRESS = 1;	// button was shortly pressed and then released
+const byte BTN_LONG_PRESS  = 2;	// button is pressed for a while and still pressed after LONG_PRESS duration
+const byte BTN_LONG_REPEAT = 3;	// button has been pressed for another LONG_PRESS duration
+
+// class to query whether the button was pressed for at least LONG_PRESS after the button was released
+class ExtButton : public Button
+{
+public:
+    ExtButton(uint8_t pin) : Button(pin), longPressCount(1) {};
+
+    byte readEvent()
+    {
+        read();
+		if (wasPressed())
+		{
+			longPressCount = 0;
+		}
+        if (wasReleased())
+        {
+            bool bShort = (longPressCount == 0);
+            longPressCount = 1;	// use 1 as marker to not send event
+            if (bShort) return BTN_SHORT_PRESS;
+        }
+		if (pressedFor(static_cast<uint16_t>(longPressCount + 1) * LONG_PRESS))
+        {
+            return (longPressCount++ == 0) ? BTN_LONG_PRESS : BTN_LONG_REPEAT;
+        }
+		return BTN_NO_PRESS;
+	}
+	
+private:
+    uint8_t    longPressCount;
+};
+
+
+ExtButton buttonVolP(pinButtonVolP);
+ExtButton buttonVolM(pinButtonVolM);
+ExtButton buttonPrev(pinButtonPrev);
+ExtButton buttonNext(pinButtonNext);
 
 bool isPlaying() {
   return !digitalRead(busyPin);
@@ -428,15 +464,16 @@ void setup() {
     key.keyByte[i] = 0xFF;
   }
 
-  pinMode(buttonPause, INPUT_PULLUP);
-  pinMode(buttonUp, INPUT_PULLUP);
-  pinMode(buttonDown, INPUT_PULLUP);
+  pinMode(pinButtonVolP, INPUT_PULLUP);
+  pinMode(pinButtonVolM, INPUT_PULLUP);
+  pinMode(pinButtonPrev, INPUT_PULLUP);
+  pinMode(pinButtonNext, INPUT_PULLUP);
   pinMode(shutdownPin, OUTPUT);
   digitalWrite(shutdownPin, LOW);
 
   // RESET --- ALLE DREI KNÖPFE BEIM STARTEN GEDRÜCKT HALTEN -> alle EINSTELLUNGEN werden gelöscht
-  if (digitalRead(buttonPause) == LOW && digitalRead(buttonUp) == LOW &&
-      digitalRead(buttonDown) == LOW) {
+  if (digitalRead(pinButtonVolP) == LOW && digitalRead(pinButtonVolM) == LOW &&
+      digitalRead(pinButtonPrev) == LOW && digitalRead(pinButtonNext) == LOW) {
     Serial.println(F("Reset -> EEPROM wird gelöscht"));
     for (int i = 0; i < EEPROM.length(); i++) {
       EEPROM.update(i, 0);
@@ -446,10 +483,16 @@ void setup() {
   playShortCut(3);
 }
 
+byte btnEvVolP = 0;
+byte btnEvVolM = 0;
+byte btnEvPrev = 0;
+byte btnEvNext = 0;
+
 void readButtons() {
-  pauseButton.read();
-  upButton.read();
-  downButton.read();
+  btnEvVolP = buttonVolP.readEvent();
+  btnEvVolM = buttonVolM.readEvent();
+  btnEvPrev = buttonPrev.readEvent();
+  btnEvNext = buttonNext.readEvent();
 }
 
 void volumeUpButton() {
@@ -578,97 +621,39 @@ void loop() {
   readButtons();
   
   // admin menu
-  if ((pauseButton.pressedFor(LONG_PRESS) || upButton.pressedFor(LONG_PRESS) || downButton.pressedFor(LONG_PRESS)) && pauseButton.isPressed() && upButton.isPressed() && downButton.isPressed()) {
+  if ((buttonVolP.pressedFor(LONG_PRESS) || buttonPrev.pressedFor(LONG_PRESS)) && 
+       buttonVolP.isPressed() && buttonPrev.isPressed())
+  {
     mp3.pause();
     do {
       readButtons();
-    } while (pauseButton.isPressed() || upButton.isPressed() || downButton.isPressed());
+    } while (buttonVolP.isPressed() || buttonPrev.isPressed());
     readButtons();
     adminMenu();
     return;
   }
   
-  if (pauseButton.wasReleased()) {
-    if (ignorePauseButton == false)
-      if (isPlaying()) {
-        mp3.pause();
-        setstandbyTimer();
-      }
-      else if (knownCard) {
-        mp3.start();
-        disablestandbyTimer();
-      }
-    ignorePauseButton = false;
-  } else if (pauseButton.pressedFor(LONG_PRESS) &&
-             ignorePauseButton == false) {
-    if (isPlaying()) {
-      uint8_t advertTrack;
-      if (myFolder->mode == Party || myFolder->mode == PartyRandom) {
-        advertTrack = (queue[currentTrack - 1]);
-      }
-      else {
-        advertTrack = currentTrack;
-      }
-      // Spezialmodus Von-Bis für Album und Party gibt die Dateinummer relativ zur Startposition wieder
-      if (myFolder->mode == SpezialVonBis || myFolder->mode == PartyRandom) {
-        advertTrack = advertTrack - myFolder->special + 1;
-      }
-      mp3.playAdvertisement(advertTrack);
-    }
-    else {
-      playShortCut(0);
-    }
-    ignorePauseButton = true;
+  // playAdvertisement only works when regular track is playing already!
+  switch (btnEvVolP)
+  {
+  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); volumeUpButton();   break;
+  case BTN_LONG_PRESS:  Serial.println(F("Vol+ long"));                      break;
   }
-
-  if (upButton.pressedFor(LONG_PRESS)) {
-    if (isPlaying()) {
-      if (!mySettings.invertVolumeButtons) {
-        volumeUpButton();
-      }
-      else {
-        nextButton();
-      }
-    }
-    else {
-      playShortCut(1);
-    }
-    ignoreUpButton = true;
-  } else if (upButton.wasReleased()) {
-    if (!ignoreUpButton)
-      if (!mySettings.invertVolumeButtons) {
-        nextButton();
-      }
-      else {
-        volumeUpButton();
-      }
-    ignoreUpButton = false;
+  switch (btnEvVolM)
+  {
+  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); volumeDownButton(); break;
+  case BTN_LONG_PRESS:  Serial.println(F("Vol- long"));  powerOff();         break;
   }
-  
-  if (downButton.pressedFor(LONG_PRESS)) {
-    if (isPlaying()) {
-      if (!mySettings.invertVolumeButtons) {
-        volumeDownButton();
-      }
-      else {
-        previousButton();
-      }
-    }
-    else {
-      playShortCut(2);
-    }
-    ignoreDownButton = true;
-  } else if (downButton.wasReleased()) {
-    if (!ignoreDownButton) {
-      if (!mySettings.invertVolumeButtons) {
-        previousButton();
-    }
-      else {
-        volumeDownButton();
-    }
-    }
-    ignoreDownButton = false;
-    }
+  switch (btnEvPrev)
+  {
+  case BTN_SHORT_PRESS: Serial.println(F("Prev short")); previousButton();   break;
+  case BTN_LONG_PRESS:  Serial.println(F("Prev long")); mp3.playAdvertisement(2); break;
+  }
+  switch (btnEvNext)
+  {
+  case BTN_SHORT_PRESS: Serial.println(F("Next short")); nextButton();       break;
+  case BTN_LONG_PRESS:  Serial.println(F("Next long"));                      break;
+  }
   // Ende der Buttons
   
   if (mfrc522.PICC_IsNewCardPresent())  // RFID Karte wurde aufgelegt
@@ -758,7 +743,8 @@ void adminMenu() {
       Serial.println(F(" Karte auflegen"));
       do {
         readButtons();
-        if (upButton.wasReleased() || downButton.wasReleased()) {
+        if (btnEvPrev == BTN_SHORT_PRESS || btnEvNext == BTN_SHORT_PRESS)
+        {
           Serial.println(F("Abgebrochen!"));
           mp3.playMp3FolderTrack(802);
           return;
@@ -806,39 +792,12 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
     }
     readButtons();
     mp3.loop();
-    if (pauseButton.pressedFor(LONG_PRESS)) {
-      mp3.playMp3FolderTrack(802);
-      ignorePauseButton = true;
-      return 0;
-    }
-    if (pauseButton.wasReleased()) {
-      if (returnValue != 0) {
-        Serial.print(F("=== "));
-        Serial.print(returnValue);
-        Serial.println(F(" ==="));
-        return returnValue;
-      }
-      delay(1000);
-    }
 
-    if (upButton.pressedFor(LONG_PRESS)) {
-      returnValue = min(returnValue + 10, numberOfOptions);
-      Serial.println(returnValue);
-      //mp3.pause();
-      mp3.playMp3FolderTrack(messageOffset + returnValue);
-      waitForTrackToFinish();
-      /*if (preview) {
-        if (previewFromFolder == 0)
-          mp3.playFolderTrack(returnValue, 1);
-        else
-          mp3.playFolderTrack(previewFromFolder, returnValue);
-        }*/
-      ignoreUpButton = true;
-    } else if (upButton.wasReleased()) {
-      if (!ignoreUpButton) {
+	switch (btnEvPrev)
+	{
+	case BTN_SHORT_PRESS:
         returnValue = min(returnValue + 1, numberOfOptions);
         Serial.println(returnValue);
-        //mp3.pause();
         mp3.playMp3FolderTrack(messageOffset + returnValue);
         if (preview) {
           waitForTrackToFinish();
@@ -849,29 +808,20 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
           }
           delay(1000);
         }
-      } else {
-        ignoreUpButton = false;
-      }
-    }
-
-    if (downButton.pressedFor(LONG_PRESS)) {
-      returnValue = max(returnValue - 10, 1);
+      break;
+	case BTN_LONG_PRESS:
+      returnValue = min(returnValue + 10, numberOfOptions);
       Serial.println(returnValue);
-      //mp3.pause();
       mp3.playMp3FolderTrack(messageOffset + returnValue);
       waitForTrackToFinish();
-      /*if (preview) {
-        if (previewFromFolder == 0)
-          mp3.playFolderTrack(returnValue, 1);
-        else
-          mp3.playFolderTrack(previewFromFolder, returnValue);
-        }*/
-      ignoreDownButton = true;
-    } else if (downButton.wasReleased()) {
-      if (!ignoreDownButton) {
+	  break;
+	}
+	
+	switch (btnEvNext)
+	{
+	case BTN_SHORT_PRESS:
         returnValue = max(returnValue - 1, 1);
         Serial.println(returnValue);
-        //mp3.pause();
         mp3.playMp3FolderTrack(messageOffset + returnValue);
         if (preview) {
           waitForTrackToFinish();
@@ -883,9 +833,31 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
           }
           delay(1000);
         }
-      } else {
-        ignoreDownButton = false;
+      break;
+	  
+	case BTN_LONG_PRESS:
+      returnValue = max(returnValue - 10, 1);
+      Serial.println(returnValue);
+      mp3.playMp3FolderTrack(messageOffset + returnValue);
+      waitForTrackToFinish();
+	  break;
 	}
+	
+	switch (btnEvVolP)
+	{
+	case BTN_SHORT_PRESS:
+	  if (returnValue != 0) {
+		Serial.print(F("=== "));
+		Serial.print(returnValue);
+		Serial.println(F(" ==="));
+		return returnValue;
+      }
+	  delay(1000);
+	  break;
+	  
+	case BTN_LONG_PRESS:
+	  mp3.playMp3FolderTrack(802);
+	  return 0;
     }
   } while (true);
 }
@@ -893,11 +865,8 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
 void resetCard() {
   mp3.playMp3FolderTrack(800);
   do {
-    pauseButton.read();
-    upButton.read();
-    downButton.read();
-
-    if (upButton.wasReleased() || downButton.wasReleased()) {
+	  readButtons();
+      if (btnEvPrev == BTN_SHORT_PRESS || btnEvNext == BTN_SHORT_PRESS) {
       Serial.print(F("Abgebrochen!"));
       mp3.playMp3FolderTrack(802);
       return;
