@@ -8,6 +8,88 @@
 
 static const uint32_t cardCookie = 322417479;
 
+
+// LED on D5 (high is off)
+class LightController
+{
+public:
+  LightController() : _isOn(false), _pwm(0), _hover(false) {};
+
+  void init()
+  {
+    pinMode(5, OUTPUT);
+    on();
+  }
+  
+  void off()
+  {
+    _isOn = false;
+    _hover = false;
+    _pwm = 0;
+    write();
+  }
+  
+  void on()
+  {
+    _isOn = true;
+    _hover = false;
+    _pwm = 255;
+    write();
+  }
+
+  void fade_on()
+  {
+    _isOn = true;
+    _hover = false;
+  }
+  
+  void fade_off()
+  {
+    _isOn = false;
+    _hover = false;
+  }
+  
+  void hover()
+  {
+    _hover = true;
+  }
+  
+  void periodic()
+  {        
+    const byte steps = 8;
+    static uint8_t lastStep = 0;
+    uint8_t now = millis();
+        
+    if (static_cast<uint8_t>(now - lastStep) < 20) return;
+    lastStep = now;
+  
+    if (_isOn)
+    {
+       _pwm = (_pwm < 255 - steps*2) ? _pwm + steps : 255;
+       if (_pwm == 255 && _hover) _isOn = false;
+    }
+    else
+    {
+       _pwm = (_pwm > steps * 2) ? _pwm - steps : 0;
+       if (_pwm == 0 && _hover) _isOn = true;
+    }
+    write();
+  }
+  
+private:
+  void write()
+  {
+    analogWrite(5, 255 - _pwm);
+  }
+  
+  bool _isOn;
+  byte _pwm;
+  bool _hover;
+};
+
+LightController light;
+
+
 // Werte nicht ändern, die sind auf den Karten gespeichert!
 enum AbspielModus
 {
@@ -183,6 +265,12 @@ void loadSettingsFromFlash() {
   Serial.println(mySettings.invertVolumeButtons);
 }
 
+void onQueueEmpty()
+{
+  setstandbyTimer();
+  light.hover();
+}
+
 // Leider kann das Modul selbst keine Queue abspielen, daher müssen wir selbst die Queue verwalten
 static uint16_t _lastTrackFinished;
 static void nextTrack(uint16_t track) {
@@ -202,7 +290,7 @@ static void nextTrack(uint16_t track) {
   case Hoerspiel:
   case HoerspielRandom:
     Serial.println(F("Hörspielmodus ist aktiv -> keinen neuen Track spielen"));
-    setstandbyTimer();
+    onQueueEmpty();
   break;
   
   case Album:
@@ -213,7 +301,7 @@ static void nextTrack(uint16_t track) {
       Serial.print(F("Albummodus ist aktiv -> nächster Track: "));
       Serial.print(currentTrack);
     } else
-      setstandbyTimer();
+      onQueueEmpty();
     break;
   
   case Party:
@@ -234,7 +322,7 @@ static void nextTrack(uint16_t track) {
 
   case EinzelTitel:
     Serial.println(F("Einzel Modus aktiv -> Strom sparen"));
-    setstandbyTimer();
+    onQueueEmpty();
     break;
   
   case Hoerbuch:
@@ -248,7 +336,7 @@ static void nextTrack(uint16_t track) {
     } else {
       // Fortschritt zurück setzen
       EEPROM.update(myFolder->folder, 1);
-      setstandbyTimer();
+      onQueueEmpty();
     }
   break;
   }
@@ -344,20 +432,21 @@ void disablestandbyTimer() {
 
 void powerOff()
 {
-  Serial.println(F("=== power off!"));
-  // enter sleep state
-  digitalWrite(shutdownPin, HIGH);
-  delay(500);
+    Serial.println(F("=== power off!"));
+    light.off();
+    // enter sleep state
+    digitalWrite(shutdownPin, HIGH);
+    delay(500);
 
-  // http://discourse.voss.earth/t/intenso-s10000-powerbank-automatische-abschaltung-software-only/805
-  // powerdown to 27mA (powerbank switches off after 30-60s)
-  mfrc522.PCD_AntennaOff();
-  mfrc522.PCD_SoftPowerDown();
-  mp3.sleep();
+    // http://discourse.voss.earth/t/intenso-s10000-powerbank-automatische-abschaltung-software-only/805
+    // powerdown to 27mA (powerbank switches off after 30-60s)
+    mfrc522.PCD_AntennaOff();
+    mfrc522.PCD_SoftPowerDown();
+    mp3.sleep();
 
-  set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-  cli();  // Disable interrupts
-  sleep_mode();
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+    cli();  // Disable interrupts
+    sleep_mode();
 }
 
 void checkStandbyAtMillis() {
@@ -445,11 +534,15 @@ void setup() {
 
   // activate standby timer
   setstandbyTimer();
+  
+  light.init();
 
   // DFPlayer Mini initialisieren
   mp3.begin();
   // Zwei Sekunden warten bis der DFPlayer Mini initialisiert ist
-  delay(2000);
+  delay(500);
+  light.off();
+  delay(1500);
   volume = mySettings.initVolume;
   mp3.setVolume(volume);
   mp3.setEq(mySettings.eq - 1);
@@ -481,6 +574,7 @@ void setup() {
   }
   // Start Shortcut "at Startup" - e.g. Welcome Sound
   playShortCut(3);
+  light.hover();
 }
 
 byte btnEvVolP = 0;
@@ -691,16 +785,19 @@ void handleCardReader()
     {
     case PCS_NEW_CARD:
       onNewCard();
+      light.fade_off();
       break;
       
     case PCS_CARD_GONE:
       mp3.pause();
       setstandbyTimer();
+      light.fade_on();
       break;
       
     case PCS_CARD_IS_BACK:
       mp3.start();
       disablestandbyTimer();
+      light.fade_off();
       break;
     }    
   }
@@ -709,6 +806,7 @@ void handleCardReader()
 
 void loop() {
 
+  light.periodic();
   checkStandbyAtMillis();
   mp3.loop();
   readButtons();
@@ -754,15 +852,15 @@ void loop() {
 
 void onNewCard()
 {    
-  if (myCard.cookie == cardCookie && myFolder->folder != 0 && myFolder->mode != Uninitialized) {
-    randomSeed(millis()); // make random a little bit more "random"
-    playFolder();
-  }
-  else { 
+    if (myCard.cookie == cardCookie && myFolder->folder != 0 && myFolder->mode != Uninitialized) {
+      randomSeed(millis()); // make random a little bit more "random"
+      playFolder();
+    }
+    else { 
 	  // Neue Karte konfigurieren
-    knownCard = false;
-    setupCard();
-  }
+      knownCard = false;
+      setupCard();
+    }
 }
 
 void adminMenu() {
