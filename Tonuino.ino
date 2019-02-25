@@ -902,7 +902,7 @@ void adminMenu() {
   Serial.println(F("=== adminMenu()"));
   knownCard = false;
 
-  int subMenu = voiceMenu(10, 900, 900, false, false, 0, true);
+  int subMenu = voiceMenu(11, 900, 900, false, false, 0, true);
   if (subMenu == 0)
     return;
   if (subMenu == 1) {
@@ -989,6 +989,14 @@ void adminMenu() {
     else {
       mySettings.invertVolumeButtons = false;
     }
+  }
+  else if (subMenu == 11) {
+    Serial.println(F("Reset -> EEPROM wird gelöscht"));
+    for (int i = 0; i < EEPROM.length(); i++) {
+      EEPROM.update(i, 0);
+    }
+    resetSettings();
+    mp3.playMp3FolderTrack(999);
   }
   writeSettingsToFlash();
   setstandbyTimer();
