@@ -269,6 +269,7 @@ void onQueueEmpty()
 {
   setstandbyTimer();
   light.hover();
+  forgetCurrentCard();
 }
 
 // Leider kann das Modul selbst keine Queue abspielen, daher müssen wir selbst die Queue verwalten
@@ -404,8 +405,8 @@ const byte blockAddr = 4;
 const byte trailerBlock = 7;
 MFRC522::StatusCode status;
 
-#define pinButtonPrev A0
-#define pinButtonNext A1
+#define pinButtonNext A0
+#define pinButtonPrev A1
 #define pinButtonVolP A2
 #define pinButtonVolM A3
 #define busyPin 4
@@ -495,6 +496,8 @@ ExtButton buttonVolP(pinButtonVolP);
 ExtButton buttonVolM(pinButtonVolM);
 ExtButton buttonPrev(pinButtonPrev);
 ExtButton buttonNext(pinButtonNext);
+
+bool g_bPaused = false;
 
 bool isPlaying() {
   return !digitalRead(busyPin);
@@ -606,13 +609,31 @@ void volumeDownButton() {
 }
 
 void nextButton() {
-  nextTrack(random(65536));
-  delay(1000);
+  if (g_bPaused)
+  {
+    mp3.start();
+    g_bPaused = false;
+    disablestandbyTimer();
+  }
+  else
+  {
+    nextTrack(random(65536));
+    delay(1000);
+  }
 }
 
 void previousButton() {
-  previousTrack();
-  delay(1000);
+  if (g_bPaused)
+  {
+    mp3.start();
+    g_bPaused = false;
+    disablestandbyTimer();
+  }
+  else
+  {
+    previousTrack();
+    delay(1000);
+  }
 }
 
 void playFolder() {
@@ -715,6 +736,13 @@ static byte lastCardUid[4];
 static byte retries;
 static bool lastCardWasUL;
 
+void forgetCurrentCard()
+{
+  for (byte i = 0; i < 4; i++)
+      lastCardUid[i] = 0;
+  hasCard   = false;
+  g_bPaused = false;
+}
 
 const byte PCS_NO_CHANGE	 = 0; // no change detected since last pollCard() call
 const byte PCS_NEW_CARD 	 = 1; // card with new UID detected (had no card or other card before)
@@ -789,13 +817,17 @@ void handleCardReader()
       break;
       
     case PCS_CARD_GONE:
-      mp3.pause();
+      if (!g_bPaused)
+        mp3.pause();
+      g_bPaused = true;
       setstandbyTimer();
-      light.fade_on();
+      light.hover();
       break;
       
     case PCS_CARD_IS_BACK:
-      mp3.start();
+      if (g_bPaused)
+        mp3.start();
+      g_bPaused = false;
       disablestandbyTimer();
       light.fade_off();
       break;
@@ -820,6 +852,7 @@ void loop() {
       readButtons();
     } while (buttonVolP.isPressed() || buttonPrev.isPressed());
     readButtons();
+    forgetCurrentCard();
     adminMenu();
     return;
   }
@@ -827,12 +860,12 @@ void loop() {
   // playAdvertisement only works when regular track is playing already!
   switch (btnEvVolP)
   {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); volumeUpButton();   break;
+  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); volumeUpButton(); volumeUpButton();  break;
   case BTN_LONG_PRESS:  Serial.println(F("Vol+ long"));                      break;
   }
   switch (btnEvVolM)
   {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); volumeDownButton(); break;
+  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); volumeDownButton(); volumeDownButton(); break;
   case BTN_LONG_PRESS:  Serial.println(F("Vol- long"));  powerOff();         break;
   }
   switch (btnEvPrev)
@@ -978,7 +1011,7 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
     readButtons();
     mp3.loop();
 
-	switch (btnEvPrev)
+	switch (btnEvNext)
 	{
 	case BTN_SHORT_PRESS:
         returnValue = min(returnValue + 1, numberOfOptions);
@@ -1002,7 +1035,7 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
 	  break;
 	}
 	
-	switch (btnEvNext)
+	switch (btnEvPrev)
 	{
 	case BTN_SHORT_PRESS:
         returnValue = max(returnValue - 1, 1);
@@ -1107,6 +1140,7 @@ void setupCard() {
   mp3.pause();
   while (isPlaying());
   writeCard(myCard);
+  forgetCurrentCard();
 }
 
 bool readCard(nfcTagObject& nfcTag) {
