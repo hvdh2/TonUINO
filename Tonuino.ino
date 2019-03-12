@@ -892,6 +892,8 @@ void onNewCard()
     else { 
 	  // Neue Karte konfigurieren
       knownCard = false;
+      mp3.playMp3FolderTrack(300);
+      waitForTrackToFinish();
       setupCard();
     }
 }
