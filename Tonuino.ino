@@ -198,10 +198,9 @@ void shuffleQueue() {
     queue[i] = queue[j];
     queue[j] = t;
   }
-  Serial.println(F("Queue :"));
-  for (uint8_t x = 0; x < numTracksInFolder - firstTrack + 1 ; x++)
-    Serial.println(queue[x]);
-
+  //Serial.println(F("Queue :"));
+  //for (uint8_t x = 0; x < numTracksInFolder - firstTrack + 1 ; x++)
+  //  Serial.println(queue[x]);
 }
 
 void writeSettingsToFlash() {
@@ -392,7 +391,7 @@ static void previousTrack() {
     EEPROM.update(myFolder->folder, currentTrack);
     break;
   }
-  delay(1000);
+  delay(200);
 }
 
 // MFRC522
@@ -592,6 +591,20 @@ void readButtons() {
   btnEvNext = buttonNext.readEvent();
 }
 
+void changeVolume(char delta)
+{
+    char volnew = volume + delta;
+    if (volnew > mySettings.maxVolume) volnew = mySettings.maxVolume;
+    if (volnew < mySettings.minVolume) volnew = mySettings.minVolume;
+    if (volnew != volume)
+    {
+	  	Serial.println(F("set volume"));
+	 	Serial.println(volnew);
+        mp3.setVolume(volnew);
+        volume = volnew;
+    }    
+}
+
 void volumeUpButton() {
   Serial.println(F("=== volumeUp()"));
   if (volume < mySettings.maxVolume)
@@ -618,7 +631,7 @@ void nextButton() {
   else
   {
     nextTrack(random(65536));
-    delay(1000);
+    delay(200);
   }
 }
 
@@ -632,13 +645,12 @@ void previousButton() {
   else
   {
     previousTrack();
-    delay(1000);
+    delay(200);
   }
 }
 
 void playFolder() {
   disablestandbyTimer();
-  randomSeed(millis() + random(1000));
   knownCard = true;
   _lastTrackFinished = 0;
   numTracksInFolder = mp3.getFolderTrackCount(myFolder->folder);
@@ -844,13 +856,13 @@ void loop() {
   readButtons();
   
   // admin menu
-  if ((buttonVolP.pressedFor(LONG_PRESS) || buttonPrev.pressedFor(LONG_PRESS)) && 
-       buttonVolP.isPressed() && buttonPrev.isPressed())
+  if ((buttonVolP.pressedFor(LONG_PRESS) || buttonNext.pressedFor(LONG_PRESS)) && 
+       buttonVolP.isPressed() && buttonNext.isPressed())
   {
     mp3.pause();
     do {
       readButtons();
-    } while (buttonVolP.isPressed() || buttonPrev.isPressed());
+    } while (buttonVolP.isPressed() || buttonNext.isPressed());
     readButtons();
     forgetCurrentCard();
     adminMenu();
@@ -860,12 +872,12 @@ void loop() {
   // playAdvertisement only works when regular track is playing already!
   switch (btnEvVolP)
   {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); volumeUpButton(); volumeUpButton();  break;
+  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); changeVolume(+3); break;
   case BTN_LONG_PRESS:  Serial.println(F("Vol+ long"));                      break;
   }
   switch (btnEvVolM)
   {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); volumeDownButton(); volumeDownButton(); break;
+  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); changeVolume(-3); break;
   case BTN_LONG_PRESS:  Serial.println(F("Vol- long"));  powerOff();         break;
   }
   switch (btnEvPrev)
@@ -885,11 +897,12 @@ void loop() {
 
 void onNewCard()
 {    
-    if (myCard.cookie == cardCookie && myFolder->folder != 0 && myFolder->mode != Uninitialized) {
-      randomSeed(millis()); // make random a little bit more "random"
+    if (myCard.cookie == cardCookie && myFolder->folder != 0 && myFolder->mode != Uninitialized)
+    {
       playFolder();
     }
-    else { 
+    else
+    { 
 	  // Neue Karte konfigurieren
       knownCard = false;
       mp3.playMp3FolderTrack(300);
@@ -909,8 +922,7 @@ void adminMenu() {
     return;
   if (subMenu == 1) {
     resetCard();
-    mfrc522.PICC_HaltA();
-    mfrc522.PCD_StopCrypto1();
+    return;
   }
   else if (subMenu == 2) {
     // Maximum Volume
@@ -1091,6 +1103,10 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
 }
 
 void resetCard() {
+  // allow connecting to other card
+  mfrc522.PICC_HaltA();
+  mfrc522.PCD_StopCrypto1();
+  
   mp3.playMp3FolderTrack(800);
   do {
 	  readButtons();
