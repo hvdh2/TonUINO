@@ -391,7 +391,7 @@ static void previousTrack() {
     EEPROM.update(myFolder->folder, currentTrack);
     break;
   }
-  delay(200);
+  delay(1000);
 }
 
 // MFRC522
@@ -631,7 +631,7 @@ void nextButton() {
   else
   {
     nextTrack(random(65536));
-    delay(200);
+    delay(1000);
   }
 }
 
@@ -645,7 +645,7 @@ void previousButton() {
   else
   {
     previousTrack();
-    delay(200);
+    delay(1000);
   }
 }
 
