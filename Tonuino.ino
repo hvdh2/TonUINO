@@ -432,7 +432,6 @@ void setstandbyTimer() {
     sleepAtMillis = millis() + (mySettings.standbyTimer * 60 * 1000);
   else
     sleepAtMillis = 0;
-  Serial.println(sleepAtMillis);
 }
 
 void disablestandbyTimer() {
@@ -840,7 +839,8 @@ void handleCardReader()
     lastCardPoll = now;
     switch (pollCard())
     {
-    case PCS_NEW_CARD:
+    case PCS_NEW_CARD:  
+      g_bPaused = false;
       onNewCard();
       light.fade_off();
       break;
