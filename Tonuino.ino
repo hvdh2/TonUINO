@@ -410,6 +410,7 @@ MFRC522::StatusCode status;
 #define pinButtonVolM A3
 #define busyPin 4
 #define shutdownPin 7
+#define openAnalogPin A7
 
 #define LONG_PRESS 1000
 
@@ -517,7 +518,14 @@ void waitForTrackToFinish() {
 void setup() {
 
   Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle Schnittstelle
-  randomSeed(analogRead(A7)); // Zufallsgenerator initialisieren
+   
+  // Wert für randomSeed() erzeugen durch das mehrfache Sammeln von rauschenden LSBs eines offenen Analogeingangs
+  uint32_t ADCSeed;
+  for(uint8_t i = 0; i < 128; i++) {
+    uint32_t ADC_LSB = analogRead(openAnalogPin) & 0x1;
+    ADCSeed ^= ADC_LSB << (i % 32); 
+  }
+  randomSeed(ADCSeed); // Zufallsgenerator initialisieren
 
   // Dieser Hinweis darf nicht entfernt werden
   Serial.println(F("\n _____         _____ _____ _____ _____"));
