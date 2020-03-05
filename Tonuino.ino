@@ -6,6 +6,17 @@
 #include <SoftwareSerial.h>
 #include <avr/sleep.h>
 
+/*
+   _____         _____ _____ _____ _____
+  |_   _|___ ___|  |  |     |   | |     |
+    | | | . |   |  |  |-   -| | | |  |  |
+    |_| |___|_|_|_____|_____|_|___|_____|
+    TonUINO Version 2.1
+
+    created by Thorsten Voß and licensed under GNU/GPL.
+    Information and contribution at https://tonuino.de.
+*/
+
 static const uint32_t cardCookie = 322417479;
 
 // some MP3 modules cause two OnPlayFinished() calls when a track ends. -> set to 1
@@ -176,10 +187,10 @@ class Mp3Notify {
       Serial.println(errorCode);
     }
     static void printSource(DfMp3_PlaySources source) {
-      if (source & DfMp3_PlaySources_Sd)    Serial.print F("SD Karte ");  return;
-      if (source & DfMp3_PlaySources_Usb)   Serial.print F("USB ");       return;
-      if (source & DfMp3_PlaySources_Flash) Serial.print F("Flash ");     return;
-            								Serial.print F("Unbekannt ");
+      if (source & DfMp3_PlaySources_Sd)    { Serial.print(F("SD Karte "));  return; }
+      if (source & DfMp3_PlaySources_Usb)   { Serial.print(F("USB "));       return; }
+      if (source & DfMp3_PlaySources_Flash) { Serial.print(F("Flash "));     return; }
+            								                  Serial.print(F("Unbekannt "));
     }
 	
 /*	
@@ -228,7 +239,7 @@ Now busy.
 	  }
       nextTrack(track);
 	  
-	  isPlaying();	// just for logging
+	    isPlaying();	// just for logging
     }
     static void OnPlaySourceOnline(DfMp3_PlaySources source) {
       printSource(source);
@@ -337,7 +348,6 @@ static void nextTrack(uint16_t track) {
   if (track == _lastTrackFinished) {
     return;
   }
-  Serial.println(F("=== nextTrack()"));
   _lastTrackFinished = track;
 
   if (!knownCard)
@@ -345,6 +355,8 @@ static void nextTrack(uint16_t track) {
     // verarbeitet werden
     return;
 
+  Serial.println(F("=== nextTrack()"));
+  
   switch (myFolder->mode)
   {    
   case Hoerspiel:
@@ -808,7 +820,7 @@ void playFolder() {
 }
 
 void playShortCut(uint8_t shortCut) {
-  Serial.print(F("=== playShortCut()"));
+  Serial.print(F("=== playShortCut() "));
   Serial.println(shortCut);
   if (mySettings.shortCuts[shortCut].folder != 0) {
     myFolder = &mySettings.shortCuts[shortCut];
@@ -1037,7 +1049,7 @@ void adminMenu() {
     mp3.playMp3FolderTrack(400);
   }
   else if (subMenu == 8) {
-      const byte aStandbyTimer[] = { 5, 15, 30, 60, 0};
+      const byte aStandbyTimer[] = { 5, 15, 30, 60, 0};	// TODO: PROGMEM
       mySettings.standbyTimer = aStandbyTimer[voiceMenu(5, 960, 960) - 1];
   }
   else if (subMenu == 9) {
