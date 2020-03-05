@@ -227,6 +227,8 @@ Now busy.
 		  }
 	  }
       nextTrack(track);
+	  
+	  isPlaying();	// just for logging
     }
     static void OnPlaySourceOnline(DfMp3_PlaySources source) {
       printSource(source);
@@ -680,13 +682,13 @@ void readButtons() {
 
 void changeVolume(char delta)
 {
-    char volnew = volume + delta;
+    int16_t volnew = volume + delta;
     if (volnew > mySettings.maxVolume) volnew = mySettings.maxVolume;
     if (volnew < mySettings.minVolume) volnew = mySettings.minVolume;
     if (volnew != volume)
     {
 	  	Serial.print(F("set volume "));
-	 	Serial.println((int)volnew);
+	 	Serial.println(volnew);
         mp3.setVolume(volnew);
         volume = volnew;
 	    //mp3.playAdvertisement(1);
