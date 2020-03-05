@@ -1203,16 +1203,18 @@ void resetCard() {
   if (!mfrc522.PICC_ReadCardSerial())
     return;
 
-  Serial.print(F("Karte wird neu Konfiguriert!"));
+  Serial.print(F("Karte wird neu konfiguriert!"));
   setupCard();
 }
 
-void setupFolder(folderSettings * theFolder) {
+bool setupFolder(folderSettings * theFolder) {
   // Ordner abfragen
   theFolder->folder = voiceMenu(99, 301, 0, true);
+  if (theFolder->folder == 0) return false;
 
   // Wiedergabemodus abfragen
   theFolder->mode = voiceMenu(9, 310, 310);
+  if (theFolder->mode == 0) return false;
 
   //  // Hörbuchmodus -> Fortschritt im EEPROM auf 1 setzen
   //  EEPROM.update(theFolder->folder, 1);
@@ -1224,12 +1226,13 @@ void setupFolder(folderSettings * theFolder) {
     theFolder->special = voiceMenu(mp3.getFolderTrackCount(theFolder->folder), 320, 0,
                                    true, theFolder->folder);
     break;
-  // Admin Funktionen
+
   case Admin:
-    theFolder->special = voiceMenu(3, 320, 320);
+    //theFolder->special = voiceMenu(3, 320, 320);
+    theFolder->folder = 0;
+    theFolder->mode = 255;
   break;
 
-  // Spezialmodus Von-Bis
   case HoerspielRandom:
   case SpezialVonBis:
   case PartyRandom:
@@ -1239,17 +1242,22 @@ void setupFolder(folderSettings * theFolder) {
                                    true, theFolder->folder, theFolder->special);
   break;
   }
+  return true;
 }
 
 void setupCard() {
   mp3.pause();
   Serial.println(F("=== setupCard()"));
-  setupFolder(&myCard.nfcFolderSettings);
-  // Karte ist konfiguriert -> speichern
-  mp3.pause();
-  while (isPlaying());
-  writeCard(myCard);
-  forgetCurrentCard();
+  nfcTagObject newCard;
+  if (setupFolder(&newCard.nfcFolderSettings))
+  {
+    // Karte ist konfiguriert -> speichern
+    mp3.pause();
+    while (isPlaying());
+    writeCard(newCard);
+    forgetCurrentCard();
+  }
+  delay(1000);
 }
 
 bool readCard(nfcTagObject& nfcTag) {
@@ -1336,7 +1344,8 @@ bool readCard(nfcTagObject& nfcTag) {
   return true;
 }
 
-void writeCard(nfcTagObject& nfcTag) {
+
+void writeCard(const nfcTagObject& nfcTag) {
   byte buffer[16] = {0x13, 0x37, 0xb3, 0x47, // 0x1337 0xb347 magic cookie to
                      // identify our nfc tags
                      0x02,                   // version 1
