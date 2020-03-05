@@ -804,7 +804,7 @@ void playFolder() {
 }
 
 void playShortCut(uint8_t shortCut) {
-  Serial.println(F("=== playShortCut()"));
+  Serial.print(F("=== playShortCut()"));
   Serial.println(shortCut);
   if (mySettings.shortCuts[shortCut].folder != 0) {
     myFolder = &mySettings.shortCuts[shortCut];
@@ -1080,12 +1080,7 @@ void adminMenu() {
   else if (subMenu == 10) {
     // Invert Functions for Up/Down Buttons
     int temp = voiceMenu(2, 933, 933, false);
-    if (temp == 2) {
-      mySettings.invertVolumeButtons = true;
-    }
-    else {
-      mySettings.invertVolumeButtons = false;
-    }
+    mySettings.invertVolumeButtons = (temp == 2);
   }
   else if (subMenu == 11) {
     Serial.println(F("Reset -> EEPROM wird gelöscht"));
@@ -1236,8 +1231,8 @@ void setupFolder(folderSettings * theFolder) {
   case PartyRandom:
   theFolder->special = voiceMenu(mp3.getFolderTrackCount(theFolder->folder), 321, 0,
                                    true, theFolder->folder);
-    theFolder->special2 = voiceMenu(mp3.getFolderTrackCount(theFolder->folder), 322, 0,
-                                    true, theFolder->folder, theFolder->special);
+  theFolder->special2 = voiceMenu(mp3.getFolderTrackCount(theFolder->folder), 322, 0,
+                                   true, theFolder->folder, theFolder->special);
   break;
   }
 }
