@@ -634,8 +634,8 @@ void setup() {
   delay(500);
   light.off();
   delay(1500);
-  volume = mySettings.initVolume;
-  mp3.setVolume(volume);
+  
+  setVolume(mySettings.initVolume);
   mp3.setEq(static_cast<DfMp3_Eq>(mySettings.eq - 1));
   // Fix für das Problem mit dem Timeout (ist jetzt in Upstream daher nicht mehr nötig!)
   //mySoftwareSerial.setTimeout(10000);
@@ -680,19 +680,23 @@ void readButtons() {
   btnEvNext = buttonNext.readEvent();
 }
 
+void setVolume(uint8_t volnew)
+{
+  Serial.print(F("set volume "));
+  Serial.println(volnew);
+  mp3.setVolume(volnew);
+  volume = volnew;
+}
+
 void changeVolume(char delta)
 {
-    int16_t volnew = volume + delta;
-    if (volnew > mySettings.maxVolume) volnew = mySettings.maxVolume;
-    if (volnew < mySettings.minVolume) volnew = mySettings.minVolume;
-    if (volnew != volume)
-    {
-	  	Serial.print(F("set volume "));
-	 	Serial.println(volnew);
-        mp3.setVolume(volnew);
-        volume = volnew;
-	    //mp3.playAdvertisement(1);
-    }    
+  int16_t volnew = volume + delta;
+  if (volnew > mySettings.maxVolume) volnew = mySettings.maxVolume;
+  if (volnew < mySettings.minVolume) volnew = mySettings.minVolume;
+  if (volnew != volume)
+  {
+    setVolume(volnew);
+  }    
 }
 
 void nextButton() {
