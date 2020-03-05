@@ -8,6 +8,9 @@
 
 static const uint32_t cardCookie = 322417479;
 
+// some MP3 modules cause two OnPlayFinished() calls when a track ends. -> set to 1
+// if playback stops after each track -> set to 0
+#define FILTER_DUPLICATE_ONPLAYFINISHED 1
 
 // LED on D5 (high is off)
 class LightController
@@ -79,7 +82,9 @@ public:
 private:
   void write()
   {
-    analogWrite(5, 255 - _pwm);
+	// apply some fake gamma curve
+	uint8_t outval = (static_cast<uint16_t>(_pwm)* static_cast<uint16_t>(_pwm)) >> 8;
+    analogWrite(5, 255 - outval);	// invert, because LED is on if pin is low.
   }
   
   bool _isOn;
@@ -147,11 +152,18 @@ nfcTagObject myCard;
 folderSettings *myFolder;
 unsigned long sleepAtMillis = 0;
 
+void powerOff();
 static void nextTrack(uint16_t track);
 uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
                   bool preview = false, int previewFromFolder = 0, int defaultValue = 0, bool exitWithLongPress = false);
 bool isPlaying();
 bool knownCard = false;
+
+uint8_t tracksLeftBeforePowerOff = 0;	// disabled if == 0,  if > 0, powerOff() will be called after 'tracksLeftBeforePowerOff' tracks have finished playing.
+
+#if FILTER_DUPLICATE_ONPLAYFINISHED
+uint16_t g_lastTrackDone = 65535;
+#endif
 
 // implement a notification class,
 // its member methods will get called
@@ -159,31 +171,74 @@ bool knownCard = false;
 class Mp3Notify {
   public:
     static void OnError(uint16_t errorCode) {
-      // see DfMp3_Error for code meaning
-      Serial.println();
-      Serial.print("Com Error ");
+      // see https://github.com/Makuna/DFMiniMp3/wiki/Notification-Method for code meaning
+      Serial.print(F("DFPlayer Error "));
       Serial.println(errorCode);
     }
-    static void PrintlnSourceAction(DfMp3_PlaySources source, const char* action) {
-      if (source & DfMp3_PlaySources_Sd) Serial.print("SD Karte ");
-      if (source & DfMp3_PlaySources_Usb) Serial.print("USB ");
-      if (source & DfMp3_PlaySources_Flash) Serial.print("Flash ");
-      Serial.println(action);
+    static void printSource(DfMp3_PlaySources source) {
+      if (source & DfMp3_PlaySources_Sd)    Serial.print F("SD Karte ");  return;
+      if (source & DfMp3_PlaySources_Usb)   Serial.print F("USB ");       return;
+      if (source & DfMp3_PlaySources_Flash) Serial.print F("Flash ");     return;
+            								Serial.print F("Unbekannt ");
     }
+	
+/*	
+OnPlayFinished source 2 g_lastTrackDone 65535 track 79	<- ignore
+Now idle.
+MP3 rx: 7E FF 6 3D 0 0 4F FE 6F EF <end>
+OnPlayFinished source 2 g_lastTrackDone 79 track 79
+=== nextTrack()
+Party -> weiter in der Queue 1
+MP3 TX: 7E FF 6 F 0 8 1 FE E3 EF <end>
+Now busy.
+*/
+
     static void OnPlayFinished(DfMp3_PlaySources source, uint16_t track) {
-      //      Serial.print("Track beendet");
-      //      Serial.println(track);
-      //      delay(100);
+            Serial.print(F("OnPlayFinished source "));
+            printSource(source);
+#if FILTER_DUPLICATE_ONPLAYFINISHED
+            Serial.print(F(" g_lastTrackDone "));
+            Serial.print(g_lastTrackDone);
+#endif
+            Serial.print(F(" track "));
+            Serial.println(track);
+	  
+	  isPlaying();	// just for logging
+
+#if FILTER_DUPLICATE_ONPLAYFINISHED
+	  // https://github.com/Makuna/DFMiniMp3/wiki/Notification-Method
+	  // If you play a single track, you should get called twice, one for the finish of the track, 
+	  // and another for the finish of the command. This is a nuance of the chip.
+	  if (track != g_lastTrackDone)
+	  {
+		g_lastTrackDone = track;
+		return;
+	  }
+#endif
+	  
+	  if (tracksLeftBeforePowerOff > 0)
+	  {
+            Serial.print(F("tracksLeftBeforePowerOff "));
+            Serial.print((uint16_t)tracksLeftBeforePowerOff);
+		  tracksLeftBeforePowerOff--;
+		  if (tracksLeftBeforePowerOff == 0)
+		  {
+			  powerOff();
+		  }
+	  }
       nextTrack(track);
     }
     static void OnPlaySourceOnline(DfMp3_PlaySources source) {
-      PrintlnSourceAction(source, "online");
+      printSource(source);
+      Serial.println(F("online"));
     }
     static void OnPlaySourceInserted(DfMp3_PlaySources source) {
-      PrintlnSourceAction(source, "bereit");
+      printSource(source);
+      Serial.println(F("bereit"));
     }
     static void OnPlaySourceRemoved(DfMp3_PlaySources source) {
-      PrintlnSourceAction(source, "entfernt");
+      printSource(source);
+      Serial.println(F("entfernt"));
     }
 };
 
@@ -204,9 +259,6 @@ void shuffleQueue() {
     queue[i] = queue[j];
     queue[j] = t;
   }
-  //Serial.println(F("Queue :"));
-  //for (uint8_t x = 0; x < numTracksInFolder - firstTrack + 1 ; x++)
-  //  Serial.println(queue[x]);
 }
 
 void writeSettingsToFlash() {
@@ -502,10 +554,30 @@ ExtButton buttonVolM(pinButtonVolM);
 ExtButton buttonPrev(pinButtonPrev);
 ExtButton buttonNext(pinButtonNext);
 
+/*
+	playAdvertisement
+		-does not work directly after setVolume!
+		
+		(busy, while playing regular track)
+		-> playAdvertisement()
+		-> Now idle.
+		-> Now busy (while playing advertisement)
+		-> Now idle. (when done with advertisement)
+		-> Now busy (resume track)
+
+		(nothing playing or regular track paused)
+		Return COM error 7, no playback
+*/
+
+
 bool g_bPaused = false;
+bool g_lastBusy = true;
 
 bool isPlaying() {
-  return !digitalRead(busyPin);
+	bool busy = !digitalRead(busyPin);
+	if (busy != g_lastBusy) Serial.println(busy ? F("Now busy.") : F("Now idle."));
+	g_lastBusy = busy;
+	return busy;
 }
 
 void waitForTrackToFinish() {
@@ -524,13 +596,15 @@ void setup() {
 
   Serial.begin(115200); // Es gibt ein paar Debug Ausgaben über die serielle Schnittstelle
    
-  // Wert für randomSeed() erzeugen durch das mehrfache Sammeln von rauschenden LSBs eines offenen Analogeingangs
-  uint32_t ADCSeed;
-  for(uint8_t i = 0; i < 128; i++) {
-    uint32_t ADC_LSB = analogRead(openAnalogPin) & 0x1;
-    ADCSeed ^= ADC_LSB << (i % 32);
+  {
+    // Wert für randomSeed() erzeugen durch das mehrfache Sammeln von rauschenden LSBs eines offenen Analogeingangs
+    uint32_t ADCSeed;
+    for(uint8_t i = 0; i < 128; i++) {
+      uint32_t ADC_LSB = analogRead(openAnalogPin) & 0x1;
+      ADCSeed ^= ADC_LSB << (i % 32);
+    }
+    randomSeed(ADCSeed); // Zufallsgenerator initialisieren
   }
-  randomSeed(ADCSeed); // Zufallsgenerator initialisieren
 
   // Dieser Hinweis darf nicht entfernt werden
   Serial.println(F("\n _____         _____ _____ _____ _____"));
@@ -560,7 +634,7 @@ void setup() {
   delay(1500);
   volume = mySettings.initVolume;
   mp3.setVolume(volume);
-  mp3.setEq(mySettings.eq - 1);
+  mp3.setEq(static_cast<DfMp3_Eq>(mySettings.eq - 1));
   // Fix für das Problem mit dem Timeout (ist jetzt in Upstream daher nicht mehr nötig!)
   //mySoftwareSerial.setTimeout(10000);
 
@@ -611,32 +685,18 @@ void changeVolume(char delta)
     if (volnew < mySettings.minVolume) volnew = mySettings.minVolume;
     if (volnew != volume)
     {
-	  	Serial.println(F("set volume"));
-	 	Serial.println(volnew);
+	  	Serial.print(F("set volume "));
+	 	Serial.println((int)volnew);
         mp3.setVolume(volnew);
         volume = volnew;
+	    //mp3.playAdvertisement(1);
     }    
-}
-
-void volumeUpButton() {
-  Serial.println(F("=== volumeUp()"));
-  if (volume < mySettings.maxVolume)
-    mp3.setVolume(++volume);
-  
-  Serial.println(volume);
-}
-
-void volumeDownButton() {
-  Serial.println(F("=== volumeDown()"));
-  if (volume > mySettings.minVolume)
-    mp3.setVolume(--volume);
-
-  Serial.println(volume);
 }
 
 void nextButton() {
   if (g_bPaused)
   {
+	light.off();
     mp3.start();
     g_bPaused = false;
     disablestandbyTimer();
@@ -861,9 +921,16 @@ void handleCardReader()
   }
 }
 
+void sleepModeButton()
+{
+	mp3.playAdvertisement(5);
+	tracksLeftBeforePowerOff++;
+}
+
 
 void loop() {
 
+  isPlaying();
   light.periodic();
   checkStandbyAtMillis();
   mp3.loop();
@@ -886,18 +953,18 @@ void loop() {
   // playAdvertisement only works when regular track is playing already!
   switch (btnEvVolP)
   {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); changeVolume(+3); break;
-  case BTN_LONG_PRESS:  Serial.println(F("Vol+ long"));                      break;
+  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); changeVolume(+3); 	 break;
+  case BTN_LONG_PRESS:  Serial.println(F("Vol+ long"));  					 break;
   }
   switch (btnEvVolM)
   {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); changeVolume(-3); break;
+  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); changeVolume(-3); 	 break;
   case BTN_LONG_PRESS:  Serial.println(F("Vol- long"));  powerOff();         break;
   }
   switch (btnEvPrev)
   {
   case BTN_SHORT_PRESS: Serial.println(F("Prev short")); previousButton();   break;
-  case BTN_LONG_PRESS:  Serial.println(F("Prev long"));                      break;
+  case BTN_LONG_PRESS:  Serial.println(F("Prev long"));  sleepModeButton();  break;
   }
   switch (btnEvNext)
   {
@@ -953,7 +1020,7 @@ void adminMenu() {
   else if (subMenu == 5) {
     // EQ
     mySettings.eq = voiceMenu(6, 920, 920, false, false, mySettings.eq);
-    mp3.setEq(mySettings.eq - 1);
+    mp3.setEq(static_cast<DfMp3_Eq>(mySettings.eq - 1));
   }
   else if (subMenu == 6) {
     // create master card
@@ -1031,7 +1098,8 @@ void adminMenu() {
 }
 
 uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
-                  bool preview = false, int previewFromFolder = 0, int defaultValue = 0, bool exitWithLongPress = false) {
+                  bool preview, int previewFromFolder, int defaultValue, bool exitWithLongPress)
+{
   uint8_t returnValue = defaultValue;
   if (startMessage != 0)
     mp3.playMp3FolderTrack(startMessage);
