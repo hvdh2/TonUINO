@@ -17,6 +17,9 @@
     Information and contribution at https://tonuino.de.
 */
 
+// uncomment the below line to enable five button support
+//#define FIVEBUTTONS
+
 static const uint32_t cardCookie = 322417479;
 
 // some MP3 modules cause two OnPlayFinished() calls when a track ends. -> set to 1
@@ -399,14 +402,14 @@ static void nextTrack(uint16_t track) {
   
   case Hoerbuch:
     if (currentTrack != numTracksInFolder) {
-      currentTrack = currentTrack + 1;
+      currentTrack++;
       Serial.print(F("Hörbuch Modus ist aktiv -> nächster Track und Fortschritt speichern"));
       Serial.println(currentTrack);
       mp3.playFolderTrack(myFolder->folder, currentTrack);
       // Fortschritt im EEPROM abspeichern
       EEPROM.update(myFolder->folder, currentTrack);
     } else {
-      // Fortschritt zurück setzen
+      // Fortschritt zurücksetzen
       EEPROM.update(myFolder->folder, 1);
       onQueueEmpty();
     }
@@ -476,10 +479,18 @@ const byte blockAddr = 4;
 const byte trailerBlock = 7;
 MFRC522::StatusCode status;
 
-#define pinButtonNext A0
-#define pinButtonPrev A1
-#define pinButtonVolP A2
-#define pinButtonVolM A3
+enum ButtonID
+{
+  Next,
+  Prev,
+  VolP,
+  VolM
+};
+
+
+const uint8_t aButtonPin[] = { A0, A1, A2, A3 };
+const uint8_t numButtons = sizeof(aButtonPin) / sizeof(*aButtonPin);
+
 #define busyPin 4
 #define shutdownPin 7
 #define openAnalogPin A7
@@ -536,37 +547,34 @@ const byte BTN_LONG_REPEAT = 3;	// button has been pressed for another LONG_PRES
 class ExtButton : public Button
 {
 public:
-    ExtButton(uint8_t pin) : Button(pin), longPressCount(1) {};
+    ExtButton(ButtonID id) : Button(aButtonPin[id]), _longPressCount(1) {};
 
     byte readEvent()
     {
-        read();
-		if (wasPressed())
-		{
-			longPressCount = 0;
-		}
-        if (wasReleased())
-        {
-            bool bShort = (longPressCount == 0);
-            longPressCount = 1;	// use 1 as marker to not send event
-            if (bShort) return BTN_SHORT_PRESS;
-        }
-		if (pressedFor(static_cast<uint16_t>(longPressCount + 1) * LONG_PRESS))
-        {
-            return (longPressCount++ == 0) ? BTN_LONG_PRESS : BTN_LONG_REPEAT;
-        }
+      read();
+		  if (wasPressed())
+		  {
+		  	_longPressCount = 0;
+		  }
+      if (wasReleased())
+      {
+          bool bShort = (_longPressCount == 0);
+          _longPressCount = 1;	// use 1 as marker to not send event
+          if (bShort) return BTN_SHORT_PRESS;
+      }
+		  if (pressedFor(static_cast<uint16_t>(_longPressCount + 1) * LONG_PRESS))
+      {
+          return (_longPressCount++ == 0) ? BTN_LONG_PRESS : BTN_LONG_REPEAT;
+      }
 		return BTN_NO_PRESS;
 	}
 	
 private:
-    uint8_t    longPressCount;
+    uint8_t    _longPressCount;
 };
 
 
-ExtButton buttonVolP(pinButtonVolP);
-ExtButton buttonVolM(pinButtonVolM);
-ExtButton buttonPrev(pinButtonPrev);
-ExtButton buttonNext(pinButtonNext);
+ExtButton button[numButtons] = { Next, Prev, VolP, VolM };
 
 /*
 	playAdvertisement
@@ -660,16 +668,17 @@ void setup() {
     key.keyByte[i] = 0xFF;
   }
 
-  pinMode(pinButtonVolP, INPUT_PULLUP);
-  pinMode(pinButtonVolM, INPUT_PULLUP);
-  pinMode(pinButtonPrev, INPUT_PULLUP);
-  pinMode(pinButtonNext, INPUT_PULLUP);
+  for (byte i = 0; i < numButtons; i++)
+  {
+    pinMode(aButtonPin[i], INPUT_PULLUP);
+  }
+  
   pinMode(shutdownPin, OUTPUT);
   digitalWrite(shutdownPin, LOW);
 
   // RESET --- ALLE DREI KNÖPFE BEIM STARTEN GEDRÜCKT HALTEN -> alle EINSTELLUNGEN werden gelöscht
-  if (digitalRead(pinButtonVolP) == LOW && digitalRead(pinButtonVolM) == LOW &&
-      digitalRead(pinButtonPrev) == LOW && digitalRead(pinButtonNext) == LOW) {
+    if (digitalRead(aButtonPin[VolP]) == LOW && digitalRead(aButtonPin[VolM]) == LOW &&
+        digitalRead(aButtonPin[Prev]) == LOW && digitalRead(aButtonPin[Next]) == LOW) {
     Serial.println(F("Reset -> EEPROM wird gelöscht"));
     for (int i = 0; i < EEPROM.length(); i++) {
       EEPROM.update(i, 0);
@@ -680,16 +689,13 @@ void setup() {
   light.hover();
 }
 
-byte btnEvVolP = 0;
-byte btnEvVolM = 0;
-byte btnEvPrev = 0;
-byte btnEvNext = 0;
+byte btnEv[numButtons] = {0};
 
 void readButtons() {
-  btnEvVolP = buttonVolP.readEvent();
-  btnEvVolM = buttonVolM.readEvent();
-  btnEvPrev = buttonPrev.readEvent();
-  btnEvNext = buttonNext.readEvent();
+  for (byte i = 0; i < numButtons; i++)
+  {
+    btnEv[i] = button[i].readEvent();
+  }
 }
 
 void setVolume(uint8_t volnew)
@@ -708,7 +714,7 @@ void changeVolume(char delta)
   if (volnew != volume)
   {
     setVolume(volnew);
-  }    
+  }
 }
 
 void nextButton() {
@@ -858,22 +864,22 @@ byte pollCard()
 	const byte maxRetries = 2;
 
 	if (!hasCard)
-    {
+  {
 		if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial() && readCard(myCard))
-        {
-          bool bSameUID = !memcmp(lastCardUid, mfrc522.uid.uidByte, 4);
-          Serial.print(F("IsSameAsLastUID="));
-          Serial.println(bSameUID);
-          // store info about current card
-          memcpy(lastCardUid, mfrc522.uid.uidByte, 4);
-          lastCardWasUL = mfrc522.PICC_GetType(mfrc522.uid.sak) == MFRC522::PICC_TYPE_MIFARE_UL;
-        
-          retries = maxRetries;
-          hasCard = true;
-          return bSameUID ? PCS_CARD_IS_BACK : PCS_NEW_CARD;
-        }
-        return PCS_NO_CHANGE;
+    {
+      bool bSameUID = !memcmp(lastCardUid, mfrc522.uid.uidByte, 4);
+      Serial.print(F("IsSameAsLastUID="));
+      Serial.println(bSameUID);
+      // store info about current card
+      memcpy(lastCardUid, mfrc522.uid.uidByte, 4);
+      lastCardWasUL = mfrc522.PICC_GetType(mfrc522.uid.sak) == MFRC522::PICC_TYPE_MIFARE_UL;
+    
+      retries = maxRetries;
+      hasCard = true;
+      return bSameUID ? PCS_CARD_IS_BACK : PCS_NEW_CARD;
     }
+    return PCS_NO_CHANGE;
+  }
 	else // hasCard
 	{
         // perform a dummy read command just to see whether the card is in range
@@ -881,25 +887,25 @@ byte pollCard()
 		byte size = sizeof(buffer);
 		
 		if (mfrc522.MIFARE_Read(lastCardWasUL ? 8 : blockAddr, buffer, &size) != MFRC522::STATUS_OK)
-        {
+    {
 			if (retries > 0)
-            {
+      {
 				retries--;
 			}
 			else
-            {
+      {
 				Serial.println(F("card gone"));
 				mfrc522.PICC_HaltA();
 				mfrc522.PCD_StopCrypto1();
 				hasCard = false;
 				return PCS_CARD_GONE;
-            }
-        }
-        else
-        {
-            retries = maxRetries;
-        }
+      }
     }
+    else
+    {
+        retries = maxRetries;
+    }
+  }
 	return PCS_NO_CHANGE;
 }
 
@@ -955,13 +961,13 @@ void loop() {
   readButtons();
   
   // admin menu
-  if ((buttonVolP.pressedFor(LONG_PRESS) || buttonNext.pressedFor(LONG_PRESS)) && 
-       buttonVolP.isPressed() && buttonNext.isPressed())
+  if ((button[VolP].pressedFor(LONG_PRESS) || button[Next].pressedFor(LONG_PRESS)) && 
+       button[VolP].isPressed() && button[Next].isPressed())
   {
     mp3.pause();
     do {
       readButtons();
-    } while (buttonVolP.isPressed() || buttonNext.isPressed());
+    } while (button[VolP].isPressed() || button[Next].isPressed());
     readButtons();
     forgetCurrentCard();
     adminMenu();
@@ -969,22 +975,22 @@ void loop() {
   }
   
   // playAdvertisement only works when regular track is playing already!
-  switch (btnEvVolP)
+  switch (btnEv[VolP])
   {
   case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); changeVolume(+3); 	 break;
   case BTN_LONG_PRESS:  Serial.println(F("Vol+ long"));  					 break;
   }
-  switch (btnEvVolM)
+  switch (btnEv[VolM])
   {
   case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); changeVolume(-3); 	 break;
   case BTN_LONG_PRESS:  Serial.println(F("Vol- long"));  powerOff();         break;
   }
-  switch (btnEvPrev)
+  switch (btnEv[Prev])
   {
   case BTN_SHORT_PRESS: Serial.println(F("Prev short")); previousButton();   break;
   case BTN_LONG_PRESS:  Serial.println(F("Prev long"));  sleepModeButton();  break;
   }
-  switch (btnEvNext)
+  switch (btnEv[Next])
   {
   case BTN_SHORT_PRESS: Serial.println(F("Next short")); nextButton();       break;
   case BTN_LONG_PRESS:  Serial.println(F("Next long"));                      break;
@@ -996,18 +1002,18 @@ void loop() {
 
 void onNewCard()
 {    
-    if (myCard.cookie == cardCookie && myFolder->folder != 0 && myFolder->mode != Uninitialized)
-    {
-      playFolder();
-    }
-    else
-    { 
+  if (myCard.cookie == cardCookie && myFolder->folder != 0 && myFolder->mode != Uninitialized)
+  {
+    playFolder();
+  }
+  else
+  { 
 	  // Neue Karte konfigurieren
-      knownCard = false;
-      mp3.playMp3FolderTrack(300);
-      waitForTrackToFinish();
-      setupCard();
-    }
+    knownCard = false;
+    mp3.playMp3FolderTrack(300);
+    waitForTrackToFinish();
+    setupCard();
+  }
 }
 
 void adminMenu() {
@@ -1074,7 +1080,7 @@ void adminMenu() {
       Serial.println(F(" Karte auflegen"));
       do {
         readButtons();
-        if (btnEvPrev == BTN_SHORT_PRESS || btnEvNext == BTN_SHORT_PRESS)
+        if (btnEv[Prev] == BTN_SHORT_PRESS || btnEv[Next] == BTN_SHORT_PRESS)
         {
           Serial.println(F("Abgebrochen!"));
           mp3.playMp3FolderTrack(802);
@@ -1128,7 +1134,7 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
     readButtons();
     mp3.loop();
 
-	switch (btnEvNext)
+	switch (btnEv[Next])
 	{
 	case BTN_SHORT_PRESS:
         returnValue = min(returnValue + 1, numberOfOptions);
@@ -1144,6 +1150,7 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
           delay(1000);
         }
       break;
+      
 	case BTN_LONG_PRESS:
       returnValue = min(returnValue + 10, numberOfOptions);
       Serial.println(returnValue);
@@ -1152,7 +1159,7 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
 	  break;
 	}
 	
-	switch (btnEvPrev)
+	switch (btnEv[Prev])
 	{
 	case BTN_SHORT_PRESS:
         returnValue = max(returnValue - 1, 1);
@@ -1178,15 +1185,15 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
 	  break;
 	}
 	
-	switch (btnEvVolP)
+	switch (btnEv[VolP])
 	{
 	case BTN_SHORT_PRESS:
 	  if (returnValue != 0) {
-		Serial.print(F("=== "));
-		Serial.print(returnValue);
-		Serial.println(F(" ==="));
-		return returnValue;
-      }
+		  Serial.print(F("=== "));
+		  Serial.print(returnValue);
+		  Serial.println(F(" ==="));
+		  return returnValue;
+    }
 	  delay(1000);
 	  break;
 	  
@@ -1205,7 +1212,7 @@ void resetCard() {
   mp3.playMp3FolderTrack(800);
   do {
 	  readButtons();
-      if (btnEvPrev == BTN_SHORT_PRESS || btnEvNext == BTN_SHORT_PRESS) {
+      if (btnEv[Prev] == BTN_SHORT_PRESS || btnEv[Next] == BTN_SHORT_PRESS) {
       Serial.print(F("Abgebrochen!"));
       mp3.playMp3FolderTrack(802);
       return;
