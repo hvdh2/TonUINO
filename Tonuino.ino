@@ -167,8 +167,8 @@ folderSettings *myFolder;
 unsigned long sleepAtMillis = 0;
 
 static void nextTrack(uint16_t track);
-uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
-                  bool preview = false, int previewFromFolder = 0, int defaultValue = 0, bool exitWithLongPress = false);
+uint8_t voiceMenu(uint8_t numberOfOptions, uint16_t startMessage, uint16_t messageOffset,
+                  bool preview = false, uint16_t previewFromFolder = 0, uint8_t defaultValue = 0, bool exitWithLongPress = false);
 bool isPlaying();
 void powerOff();
 
@@ -483,10 +483,7 @@ MFRC522::StatusCode status;
 
 enum ButtonID
 {
-  Next,
-  Prev,
-  VolP,
-  VolM
+  Next, Prev, VolP, VolM
 };
 
 
@@ -540,18 +537,22 @@ void checkStandbyAtMillis() {
 }
 
 
-const byte BTN_NO_PRESS    = 0; // nothing happened
-const byte BTN_SHORT_PRESS = 1; // button was shortly pressed and then released
-const byte BTN_LONG_PRESS  = 2; // button is pressed for a while and still pressed after LONG_PRESS duration
-const byte BTN_LONG_REPEAT = 3; // button has been pressed for another LONG_PRESS duration
+// bitmasks to create ButtonEventID
+const byte NoEvent      = 0x00;
+const byte AllThree     = 0x01;  // buttons 1-3 are pressed, then released
+const byte ShortPress   = 0x48;  // button was shortly pressed and then released
+const byte LongPress    = 0x50;  // button is pressed for a while and still pressed after LONG_PRESS duration
+const byte LongRepeat   = 0x58;  // button has been pressed for another LONG_PRESS duration
+
+typedef uint8_t ButtonEvt; // ButtonID + bitmask
 
 // class to query whether the button was pressed for at least LONG_PRESS after the button was released
 class ExtButton : public Button
 {
 public:
-  ExtButton(ButtonID id) : Button(aButtonPin[id]), _longPressCount(1) {};
+  ExtButton(ButtonID id) : Button(aButtonPin[id]), _id(id), _longPressCount(1) {};
 
-  byte readEvent()
+  ButtonEvt readEvent()
   {
     read();
     if (wasPressed()) _longPressCount = 0;
@@ -560,17 +561,18 @@ public:
     {
       bool bShort = (_longPressCount == 0);
       _longPressCount = 1;  // use 1 as marker to not send event
-      if (bShort) return BTN_SHORT_PRESS;
+      if (bShort) return (_id | ShortPress);
     }
     if (pressedFor(static_cast<uint16_t>(_longPressCount + 1) * LONG_PRESS))
     {
-      return (_longPressCount++ == 0) ? BTN_LONG_PRESS : BTN_LONG_REPEAT;
+      return _id | ((_longPressCount++ == 0) ? LongPress : LongRepeat);
     }
-    return BTN_NO_PRESS;
+    return NoEvent;
   }
   
 private:
-  uint8_t    _longPressCount;
+  const ButtonID  _id;
+  uint8_t         _longPressCount;
 };
 
 
@@ -590,6 +592,40 @@ ExtButton button[numButtons] = { Next, Prev, VolP, VolM };
     (nothing playing or regular track paused)
     Return COM error 7, no playback
 */
+
+struct ButtonHandler
+{
+  ButtonHandler() : _buttonsPressed(0), _waitUntilAllReleased(false) {}
+  
+  ButtonEvt read()
+  {
+    _buttonsPressed = 0;
+    for (uint8_t i = 0; i < numButtons; i++)
+    {
+      ButtonEvt evt = button[i].readEvent();
+      if (button[i].isPressed()) _buttonsPressed++;
+      
+      if (evt != NoEvent)
+      {
+        Serial.print(F("Single button event "));
+        Serial.println(evt, HEX);
+        return evt;
+      }
+      if (_buttonsPressed == 3)
+      {
+        _waitUntilAllReleased = true;
+        return AllThree;
+      }
+    }
+    return NoEvent;
+  }
+  
+  byte      _btnEv[numButtons] = {0};
+  uint8_t   _buttonsPressed;
+  bool      _waitUntilAllReleased;
+};
+
+ButtonHandler buttons;
 
 
 bool g_bPaused = false;
@@ -689,14 +725,6 @@ void setup() {
   light.hover();
 }
 
-byte btnEv[numButtons] = {0};
-
-void readButtons() {
-  for (byte i = 0; i < numButtons; i++)
-  {
-    btnEv[i] = button[i].readEvent();
-  }
-}
 
 void setVolume(uint8_t volnew)
 {
@@ -952,51 +980,29 @@ void sleepModeButton()
 }
 
 
-void loop() {
-
+void loop()
+{
   isPlaying();    // for logging
   light.periodic();
   checkStandbyAtMillis();
   mp3.loop();
-  readButtons();
   
-  // admin menu
-  if ((button[VolP].pressedFor(LONG_PRESS) || button[Next].pressedFor(LONG_PRESS)) && 
-       button[VolP].isPressed() && button[Next].isPressed())
+  switch (buttons.read())
   {
+  case VolP | ShortPress: Serial.println(F("Vol+ short")); changeVolume(+3);   break;
+  case VolP | LongPress:  Serial.println(F("Vol+ long"));                      break;
+  case VolM | ShortPress: Serial.println(F("Vol- short")); changeVolume(-3);   break;
+  case VolM | LongPress:  Serial.println(F("Vol- long"));  powerOff();         break;
+  case Prev | ShortPress: Serial.println(F("Prev short")); previousButton();   break;
+  case Prev | LongPress:  Serial.println(F("Prev long"));  sleepModeButton();  break;
+  case Next | ShortPress: Serial.println(F("Next short")); nextButton();       break;
+  case Next | LongPress:  Serial.println(F("Next long"));                      break;
+  case AllThree:
     mp3.pause();
-    do {
-      readButtons();
-    } while (button[VolP].isPressed() || button[Next].isPressed());
-    readButtons();
     forgetCurrentCard();
     adminMenu();
-    return;
   }
   
-  // playAdvertisement only works when regular track is playing already!
-  switch (btnEv[VolP])
-  {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); changeVolume(+3);   break;
-  case BTN_LONG_PRESS:  Serial.println(F("Vol+ long"));            break;
-  }
-  switch (btnEv[VolM])
-  {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); changeVolume(-3);   break;
-  case BTN_LONG_PRESS:  Serial.println(F("Vol- long"));  powerOff();         break;
-  }
-  switch (btnEv[Prev])
-  {
-  case BTN_SHORT_PRESS: Serial.println(F("Prev short")); previousButton();   break;
-  case BTN_LONG_PRESS:  Serial.println(F("Prev long"));  sleepModeButton();  break;
-  }
-  switch (btnEv[Next])
-  {
-  case BTN_SHORT_PRESS: Serial.println(F("Next short")); nextButton();       break;
-  case BTN_LONG_PRESS:  Serial.println(F("Next long"));                      break;
-  }
-  // Ende der Buttons
-
   handleCardReader();
 }
 
@@ -1038,15 +1044,17 @@ void adminMenuCreateCardsForFolder()
     tempCard.nfcFolderSettings.special = x;
     Serial.print(x);
     Serial.println(F(" Karte auflegen"));
-    do {
-      readButtons();
-      if (btnEv[Prev] == BTN_SHORT_PRESS || btnEv[Next] == BTN_SHORT_PRESS)
+    while (!mfrc522.PICC_IsNewCardPresent())
+    {
+      switch (buttons.read())
       {
+      case Prev | ShortPress:
+      case Next | ShortPress:
         Serial.println(F("Abgebrochen!"));
         mp3.playMp3FolderTrack(802);
         return;
       }
-    } while (!mfrc522.PICC_IsNewCardPresent());
+    }
 
     // RFID Karte wurde aufgelegt
     if (mfrc522.PICC_ReadCardSerial())
@@ -1133,8 +1141,8 @@ void adminMenu() {
   setstandbyTimer();
 }
 
-uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
-                  bool preview, int previewFromFolder, int defaultValue, bool exitWithLongPress)
+uint8_t voiceMenu(uint8_t numberOfOptions, uint16_t startMessage, uint16_t messageOffset,
+            bool preview, uint16_t previewFromFolder, uint8_t defaultValue, bool exitWithLongPress)
 {
   uint8_t returnValue = defaultValue;
   if (startMessage != 0)
@@ -1142,83 +1150,78 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
   Serial.print(F("=== voiceMenu() ("));
   Serial.print(numberOfOptions);
   Serial.println(F(" Options)"));
-  do {
+  
+  while (true)
+  {
     if (Serial.available() > 0) {
       int optionSerial = Serial.parseInt();
       if (optionSerial != 0 && optionSerial <= numberOfOptions)
         return optionSerial;
     }
-    readButtons();
     mp3.loop();
 
-  switch (btnEv[Next])
-  {
-  case BTN_SHORT_PRESS:
-    returnValue = min(returnValue + 1, numberOfOptions);
-    Serial.println(returnValue);
-    mp3.playMp3FolderTrack(messageOffset + returnValue);
-    if (preview) {
-      waitForTrackToFinish();
-      if (previewFromFolder == 0) {
-        mp3.playFolderTrack(returnValue, 1);
-      } else {
-        mp3.playFolderTrack(previewFromFolder, returnValue);
+    switch (buttons.read())
+    {
+    case Next | ShortPress:
+      returnValue = min(returnValue + 1, numberOfOptions);
+      Serial.println(returnValue);
+      mp3.playMp3FolderTrack(messageOffset + returnValue);
+      if (preview) {
+        waitForTrackToFinish();
+        if (previewFromFolder == 0) {
+          mp3.playFolderTrack(returnValue, 1);
+        } else {
+          mp3.playFolderTrack(previewFromFolder, returnValue);
+        }
+        delay(1000);
       }
-      delay(1000);
-    }
-    break;
+      break;
+    
+    case Next | LongPress:
+      returnValue = min(returnValue + 10, numberOfOptions);
+      Serial.println(returnValue);
+      mp3.playMp3FolderTrack(messageOffset + returnValue);
+      waitForTrackToFinish();
+      break;
       
-  case BTN_LONG_PRESS:
-    returnValue = min(returnValue + 10, numberOfOptions);
-    Serial.println(returnValue);
-    mp3.playMp3FolderTrack(messageOffset + returnValue);
-    waitForTrackToFinish();
-    break;
-  }
-  
-  switch (btnEv[Prev])
-  {
-  case BTN_SHORT_PRESS:
-    returnValue = max(returnValue - 1, 1);
-    Serial.println(returnValue);
-    mp3.playMp3FolderTrack(messageOffset + returnValue);
-    if (preview) {
-      waitForTrackToFinish();
-      if (previewFromFolder == 0) {
-        mp3.playFolderTrack(returnValue, 1);
+    case Prev | ShortPress:
+      returnValue = max(returnValue - 1, 1);
+      Serial.println(returnValue);
+      mp3.playMp3FolderTrack(messageOffset + returnValue);
+      if (preview) {
+        waitForTrackToFinish();
+        if (previewFromFolder == 0) {
+          mp3.playFolderTrack(returnValue, 1);
+        }
+        else {
+          mp3.playFolderTrack(previewFromFolder, returnValue);
+        }
+        delay(1000);
       }
-      else {
-        mp3.playFolderTrack(previewFromFolder, returnValue);
+      break;
+      
+    case Prev | LongPress:
+      returnValue = max(returnValue - 10, 1);
+      Serial.println(returnValue);
+      mp3.playMp3FolderTrack(messageOffset + returnValue);
+      waitForTrackToFinish();
+      break;
+      
+    case VolP | ShortPress:
+      if (returnValue != 0) {
+        Serial.print(F("=== "));
+        Serial.print(returnValue);
+        Serial.println(F(" ==="));
+        return returnValue;
       }
       delay(1000);
-    }
-    break;
-    
-  case BTN_LONG_PRESS:
-    returnValue = max(returnValue - 10, 1);
-    Serial.println(returnValue);
-    mp3.playMp3FolderTrack(messageOffset + returnValue);
-    waitForTrackToFinish();
-    break;
-  }
+      break;
   
-  switch (btnEv[VolP])
-  {
-  case BTN_SHORT_PRESS:
-    if (returnValue != 0) {
-      Serial.print(F("=== "));
-      Serial.print(returnValue);
-      Serial.println(F(" ==="));
-      return returnValue;
+    case VolP | LongPress:
+      mp3.playMp3FolderTrack(802);
+      return 0;
     }
-    delay(1000);
-    break;
-    
-  case BTN_LONG_PRESS:
-    mp3.playMp3FolderTrack(802);
-    return 0;
-    }
-  } while (true);
+  }
 }
 
 void resetCard() {
@@ -1227,14 +1230,17 @@ void resetCard() {
   mfrc522.PCD_StopCrypto1();
   
   mp3.playMp3FolderTrack(800);
-  do {
-    readButtons();
-      if (btnEv[Prev] == BTN_SHORT_PRESS || btnEv[Next] == BTN_SHORT_PRESS) {
+  while (!mfrc522.PICC_IsNewCardPresent())
+  {
+    switch (buttons.read())
+    {
+    case Prev | ShortPress:
+    case Next | ShortPress:
       Serial.print(F("Abgebrochen!"));
       mp3.playMp3FolderTrack(802);
       return;
     }
-  } while (!mfrc522.PICC_IsNewCardPresent());
+  }
 
   if (!mfrc522.PICC_ReadCardSerial())
     return;
