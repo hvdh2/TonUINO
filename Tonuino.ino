@@ -166,7 +166,6 @@ nfcTagObject myCard;
 folderSettings *myFolder;
 unsigned long sleepAtMillis = 0;
 
-void powerOff();
 static void nextTrack(uint16_t track);
 uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
                   bool preview = false, int previewFromFolder = 0, int defaultValue = 0, bool exitWithLongPress = false);
@@ -183,18 +182,18 @@ uint16_t g_lastTrackDone = 65535;
 // its member methods will get called
 //
 class Mp3Notify {
-  public:
-    static void OnError(uint16_t errorCode) {
-      // see https://github.com/Makuna/DFMiniMp3/wiki/Notification-Method for code meaning
-      Serial.print(F("DFPlayer Error "));
-      Serial.println(errorCode);
-    }
-    static void printSource(DfMp3_PlaySources source) {
-      if (source & DfMp3_PlaySources_Sd)    { Serial.print(F("SD Karte "));  return; }
-      if (source & DfMp3_PlaySources_Usb)   { Serial.print(F("USB "));       return; }
-      if (source & DfMp3_PlaySources_Flash) { Serial.print(F("Flash "));     return; }
-            								                  Serial.print(F("Unbekannt "));
-    }
+public:
+  static void OnError(uint16_t errorCode) {
+    // see https://github.com/Makuna/DFMiniMp3/wiki/Notification-Method for code meaning
+    Serial.print(F("DFPlayer Error "));
+    Serial.println(errorCode);
+  }
+  static void printSource(DfMp3_PlaySources source) {
+    if (source & DfMp3_PlaySources_Sd)    { Serial.print(F("SD Karte "));  return; }
+    if (source & DfMp3_PlaySources_Usb)   { Serial.print(F("USB "));       return; }
+    if (source & DfMp3_PlaySources_Flash) { Serial.print(F("Flash "));     return; }
+                                            Serial.print(F("Unbekannt "));
+  }
 	
 /*	
 OnPlayFinished source 2 g_lastTrackDone 65535 track 79	<- ignore
@@ -207,17 +206,17 @@ MP3 TX: 7E FF 6 F 0 8 1 FE E3 EF <end>
 Now busy.
 */
 
-    static void OnPlayFinished(DfMp3_PlaySources source, uint16_t track) {
-            Serial.print(F("OnPlayFinished source "));
-            printSource(source);
+  static void OnPlayFinished(DfMp3_PlaySources source, uint16_t track) {
+    Serial.print(F("OnPlayFinished source "));
+    printSource(source);
 #if FILTER_DUPLICATE_ONPLAYFINISHED
-            Serial.print(F(" g_lastTrackDone "));
-            Serial.print(g_lastTrackDone);
+    Serial.print(F(" g_lastTrackDone "));
+    Serial.print(g_lastTrackDone);
 #endif
-            Serial.print(F(" track "));
-            Serial.println(track);
-	  
-	  isPlaying();	// just for logging
+    Serial.print(F(" track "));
+    Serial.println(track);
+  
+    isPlaying();	// just for logging
 
 #if FILTER_DUPLICATE_ONPLAYFINISHED
 	  // https://github.com/Makuna/DFMiniMp3/wiki/Notification-Method
@@ -225,37 +224,37 @@ Now busy.
 	  // and another for the finish of the command. This is a nuance of the chip.
 	  if (track != g_lastTrackDone)
 	  {
-		g_lastTrackDone = track;
-		return;
+      g_lastTrackDone = track;
+      return;
 	  }
 #endif
 	  
 	  if (tracksLeftBeforePowerOff > 0)
 	  {
-            Serial.print(F("tracksLeftBeforePowerOff "));
-            Serial.print((uint16_t)tracksLeftBeforePowerOff);
+      Serial.print(F("tracksLeftBeforePowerOff "));
+      Serial.print((uint16_t)tracksLeftBeforePowerOff);
 		  tracksLeftBeforePowerOff--;
 		  if (tracksLeftBeforePowerOff == 0)
 		  {
 			  powerOff();
 		  }
 	  }
-      nextTrack(track);
-	  
-	    isPlaying();	// just for logging
-    }
-    static void OnPlaySourceOnline(DfMp3_PlaySources source) {
-      printSource(source);
-      Serial.println(F("online"));
-    }
-    static void OnPlaySourceInserted(DfMp3_PlaySources source) {
-      printSource(source);
-      Serial.println(F("bereit"));
-    }
-    static void OnPlaySourceRemoved(DfMp3_PlaySources source) {
-      printSource(source);
-      Serial.println(F("entfernt"));
-    }
+    nextTrack(track);
+  
+    isPlaying();	// just for logging
+  }
+  static void OnPlaySourceOnline(DfMp3_PlaySources source) {
+    printSource(source);
+    Serial.println(F("online"));
+  }
+  static void OnPlaySourceInserted(DfMp3_PlaySources source) {
+    printSource(source);
+    Serial.println(F("bereit"));
+  }
+  static void OnPlaySourceRemoved(DfMp3_PlaySources source) {
+    printSource(source);
+    Serial.println(F("entfernt"));
+  }
 };
 
 static DFMiniMp3<SoftwareSerial, Mp3Notify> mp3(mySoftwareSerial);
@@ -393,7 +392,7 @@ static void nextTrack(uint16_t track) {
     }
     Serial.println(queue[currentTrack - 1]);
     mp3.playFolderTrack(myFolder->folder, queue[currentTrack - 1]);
-  break;
+    break;
 
   case EinzelTitel:
     Serial.println(F("Einzel Modus aktiv -> Strom sparen"));
@@ -413,7 +412,7 @@ static void nextTrack(uint16_t track) {
       EEPROM.update(myFolder->folder, 1);
       onQueueEmpty();
     }
-  break;
+    break;
   }
   delay(500);
 }
@@ -433,7 +432,7 @@ static void previousTrack() {
       currentTrack--;
     
     mp3.playFolderTrack(myFolder->folder, currentTrack);
-  break;
+    break;
   
   case Party:
   case PartyRandom:
@@ -453,7 +452,7 @@ static void previousTrack() {
   case EinzelTitel:
     Serial.println(F("Einzel Modus aktiv -> Track von vorne spielen"));
     mp3.playFolderTrack(myFolder->folder, currentTrack);
-  break;
+    break;
   
   case Hoerbuch:
     Serial.println(F("Hörbuch Modus ist aktiv -> vorheriger Track und "
