@@ -536,19 +536,48 @@ void checkStandbyAtMillis() {
     powerOff();
 }
 
+/*
+  playAdvertisement
+    -does not work directly after setVolume!
+    
+    (busy, while playing regular track)
+    -> playAdvertisement()
+    -> Now idle.
+    -> Now busy (while playing advertisement)
+    -> Now idle.(when done with advertisement)
+    -> Now busy (resume track)
+
+    (nothing playing or regular track paused)
+    Return COM error 7, no playback
+*/
+
+
+// Use ButtonHandler.handle() return value to read codes.
+// Valid codes (using Next, Prev as sample buttons:
+//  Next | ShortPress                                   "Next" was pressed and quickly released
+//  Next | LongPress                                    "Next" was pressed and is still held (after first LONG_PRESS duration)
+//  Next | LongRepeat                                   "Next" was pressed and is still held (after following LONG_PRESS durations)
+//  TwoButtons | Next | (Prev << As2nd) | ShortPress    "Next" was pressed and then "Prev", which was quickly released
+//  TwoButtons | Next | (Prev << As2nd) | LongPress     "Next" was pressed and then also "Prev", 
+//                                                        which is still held (after first LONG_PRESS duration)
+//  TwoButtons | Next | (Prev << As2nd) | LongRepeat    "Next" was pressed and then also "Prev",
+//                                                        which is still held (after following LONG_PRESS durations)
+//  AllThreeLong                                        any three buttons have been pressed at the same time for one LONG_PRESS duration
+
 
 // bitmasks to create ButtonEventID
-const byte NoEvent      = 0x00;
-const byte AllThreeLong = 0x01;  // buttons 1-3 are pressed and held for LONG_PRESS duration
-const byte ShortPress   = 0x08;  // button was shortly pressed and then released
-const byte LongPress    = 0x10;  // button is pressed for a while and still pressed after LONG_PRESS duration
-const byte LongRepeat   = 0x20;  // button has been pressed for another LONG_PRESS duration
-const byte OnPress      = 0x40;  // button just changed to pressed
-const byte PressTypeMask = ShortPress | LongPress | LongRepeat;
-const byte TwoButtons   = 0x80;
-const byte As2nd        = 3;
+const uint8_t NoEvent      = 0x00;
+const uint8_t AllThreeLong = 0x01;  // buttons 1-3 are pressed and held for LONG_PRESS duration
+const uint8_t ShortPress   = 0x08;  // button was shortly pressed and then released
+const uint8_t LongPress    = 0x10;  // button is pressed for a while and still pressed after LONG_PRESS duration
+const uint8_t LongRepeat   = 0x20;  // button has been pressed for another LONG_PRESS duration
+const uint8_t OnPress      = 0x40;  // button just changed to pressed
+const uint8_t PressTypeMask = ShortPress | LongPress | LongRepeat;
+const uint8_t TwoButtons   = 0x80;
+const uint8_t As2nd        = 3;
 
 typedef uint8_t ButtonEvt; // ButtonID + bitmask
+
 
 // class to query whether the button was pressed for at least LONG_PRESS after the button was released
 class ExtButton : public Button
@@ -579,26 +608,12 @@ public:
   }
   
 private:
-  uint8_t         _longPressCount;
+  uint8_t    _longPressCount;
 };
 
 
 ExtButton button[numButtons] = { Next, Prev, VolP, VolM };
 
-/*
-  playAdvertisement
-    -does not work directly after setVolume!
-    
-    (busy, while playing regular track)
-    -> playAdvertisement()
-    -> Now idle.
-    -> Now busy (while playing advertisement)
-    -> Now idle.(when done with advertisement)
-    -> Now busy (resume track)
-
-    (nothing playing or regular track paused)
-    Return COM error 7, no playback
-*/
 
 struct ButtonHandler
 {
@@ -615,10 +630,7 @@ struct ButtonHandler
       if (button[i].isPressed() || (_btnEv[i] & ShortPress)) buttonsPressed++;
     }
 
-    if (buttonsPressed > 1 && !button[_firstPressed].isPressed())
-    {
-      _waitUntilLessThanPressed = 1;
-    }
+    if (buttonsPressed > 1 && !button[_firstPressed].isPressed()) _waitUntilLessThanPressed = 1;
     
     if (_waitUntilLessThanPressed > 0 && buttonsPressed >= _waitUntilLessThanPressed) return;
     _waitUntilLessThanPressed = 0;
@@ -660,10 +672,10 @@ struct ButtonHandler
     return NoEvent;
   }
   
-  byte      _firstPressed;
-  byte      _lastPressed;  
-  byte      _btnEv[numButtons] = {0};
+  uint8_t   _firstPressed;
+  uint8_t   _lastPressed;
   uint8_t   _waitUntilLessThanPressed;   // if > 0, no events are fired until number of pressed buttons is <= _waitUntilNPressed
+  uint8_t   _btnEv[numButtons];
 };
 
 ButtonHandler buttons;
@@ -1028,8 +1040,6 @@ void loop()
   checkStandbyAtMillis();
   mp3.loop();
   
-  buttons.read();
-  /*
   switch (buttons.read())
   {
   case VolP | ShortPress: Serial.println(F("Vol+ short")); changeVolume(+3);   break;
@@ -1040,12 +1050,13 @@ void loop()
   case Prev | LongPress:  Serial.println(F("Prev long"));  sleepModeButton();  break;
   case Next | ShortPress: Serial.println(F("Next short")); nextButton();       break;
   case Next | LongPress:  Serial.println(F("Next long"));                      break;
-  case AllThree:
+  case AllThreeLong:
     mp3.pause();
     forgetCurrentCard();
     adminMenu();
+    break;
   }
-  */
+  
   handleCardReader();
 }
 
@@ -1157,7 +1168,7 @@ void adminMenu() {
     break;
     
   case 8:
-    const byte aStandbyTimer[] = { 5, 15, 30, 60, 0};	// TODO: PROGMEM
+    const byte PROGMEM aStandbyTimer[] = { 5, 15, 30, 60, 0};	// TODO: PROGMEM
     mySettings.standbyTimer = aStandbyTimer[voiceMenu(5, 960, 960) - 1];
     break;
     
