@@ -96,9 +96,9 @@ public:
 private:
   void write()
   {
-	// apply some fake gamma curve
-	uint8_t outval = (static_cast<uint16_t>(_pwm)* static_cast<uint16_t>(_pwm)) >> 8;
-    analogWrite(5, 255 - outval);	// invert, because LED is on if pin is low.
+  // apply some fake gamma curve
+  uint8_t outval = (static_cast<uint16_t>(_pwm)* static_cast<uint16_t>(_pwm)) >> 8;
+    analogWrite(5, 255 - outval); // invert, because LED is on if pin is low.
   }
   
   bool _isOn;
@@ -170,9 +170,11 @@ static void nextTrack(uint16_t track);
 uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
                   bool preview = false, int previewFromFolder = 0, int defaultValue = 0, bool exitWithLongPress = false);
 bool isPlaying();
+void powerOff();
+
 bool knownCard = false;
 
-uint8_t tracksLeftBeforePowerOff = 0;	// disabled if == 0,  if > 0, powerOff() will be called after 'tracksLeftBeforePowerOff' tracks have finished playing.
+uint8_t tracksLeftBeforePowerOff = 0; // disabled if == 0,  if > 0, powerOff() will be called after 'tracksLeftBeforePowerOff' tracks have finished playing.
 
 #if FILTER_DUPLICATE_ONPLAYFINISHED
 uint16_t g_lastTrackDone = 65535;
@@ -194,9 +196,9 @@ public:
     if (source & DfMp3_PlaySources_Flash) { Serial.print(F("Flash "));     return; }
                                             Serial.print(F("Unbekannt "));
   }
-	
-/*	
-OnPlayFinished source 2 g_lastTrackDone 65535 track 79	<- ignore
+  
+/*  
+OnPlayFinished source 2 g_lastTrackDone 65535 track 79  <- ignore
 Now idle.
 MP3 rx: 7E FF 6 3D 0 0 4F FE 6F EF <end>
 OnPlayFinished source 2 g_lastTrackDone 79 track 79
@@ -216,32 +218,32 @@ Now busy.
     Serial.print(F(" track "));
     Serial.println(track);
   
-    isPlaying();	// just for logging
+    isPlaying();  // just for logging
 
 #if FILTER_DUPLICATE_ONPLAYFINISHED
-	  // https://github.com/Makuna/DFMiniMp3/wiki/Notification-Method
-	  // If you play a single track, you should get called twice, one for the finish of the track, 
-	  // and another for the finish of the command. This is a nuance of the chip.
-	  if (track != g_lastTrackDone)
-	  {
+    // https://github.com/Makuna/DFMiniMp3/wiki/Notification-Method
+    // If you play a single track, you should get called twice, one for the finish of the track, 
+    // and another for the finish of the command. This is a nuance of the chip.
+    if (track != g_lastTrackDone)
+    {
       g_lastTrackDone = track;
       return;
-	  }
+    }
 #endif
-	  
-	  if (tracksLeftBeforePowerOff > 0)
-	  {
+    
+    if (tracksLeftBeforePowerOff > 0)
+    {
       Serial.print(F("tracksLeftBeforePowerOff "));
       Serial.print((uint16_t)tracksLeftBeforePowerOff);
-		  tracksLeftBeforePowerOff--;
-		  if (tracksLeftBeforePowerOff == 0)
-		  {
-			  powerOff();
-		  }
-	  }
+      tracksLeftBeforePowerOff--;
+      if (tracksLeftBeforePowerOff == 0)
+      {
+        powerOff();
+      }
+    }
     nextTrack(track);
   
-    isPlaying();	// just for logging
+    isPlaying();  // just for logging
   }
   static void OnPlaySourceOnline(DfMp3_PlaySources source) {
     printSource(source);
@@ -337,6 +339,7 @@ void loadSettingsFromFlash() {
   Serial.println(mySettings.invertVolumeButtons);
 }
 
+// called when the last track has finished playing
 void onQueueEmpty()
 {
   setstandbyTimer();
@@ -365,7 +368,7 @@ static void nextTrack(uint16_t track) {
   case HoerspielRandom:
     Serial.println(F("Hörspielmodus ist aktiv -> keinen neuen Track spielen"));
     onQueueEmpty();
-  break;
+    break;
   
   case Album:
   case SpezialVonBis:
@@ -538,56 +541,54 @@ void checkStandbyAtMillis() {
 
 
 const byte BTN_NO_PRESS    = 0; // nothing happened
-const byte BTN_SHORT_PRESS = 1;	// button was shortly pressed and then released
-const byte BTN_LONG_PRESS  = 2;	// button is pressed for a while and still pressed after LONG_PRESS duration
-const byte BTN_LONG_REPEAT = 3;	// button has been pressed for another LONG_PRESS duration
+const byte BTN_SHORT_PRESS = 1; // button was shortly pressed and then released
+const byte BTN_LONG_PRESS  = 2; // button is pressed for a while and still pressed after LONG_PRESS duration
+const byte BTN_LONG_REPEAT = 3; // button has been pressed for another LONG_PRESS duration
 
 // class to query whether the button was pressed for at least LONG_PRESS after the button was released
 class ExtButton : public Button
 {
 public:
-    ExtButton(ButtonID id) : Button(aButtonPin[id]), _longPressCount(1) {};
+  ExtButton(ButtonID id) : Button(aButtonPin[id]), _longPressCount(1) {};
 
-    byte readEvent()
+  byte readEvent()
+  {
+    read();
+    if (wasPressed()) _longPressCount = 0;
+    
+    if (wasReleased())
     {
-      read();
-		  if (wasPressed())
-		  {
-		  	_longPressCount = 0;
-		  }
-      if (wasReleased())
-      {
-          bool bShort = (_longPressCount == 0);
-          _longPressCount = 1;	// use 1 as marker to not send event
-          if (bShort) return BTN_SHORT_PRESS;
-      }
-		  if (pressedFor(static_cast<uint16_t>(_longPressCount + 1) * LONG_PRESS))
-      {
-          return (_longPressCount++ == 0) ? BTN_LONG_PRESS : BTN_LONG_REPEAT;
-      }
-		return BTN_NO_PRESS;
-	}
-	
+      bool bShort = (_longPressCount == 0);
+      _longPressCount = 1;  // use 1 as marker to not send event
+      if (bShort) return BTN_SHORT_PRESS;
+    }
+    if (pressedFor(static_cast<uint16_t>(_longPressCount + 1) * LONG_PRESS))
+    {
+      return (_longPressCount++ == 0) ? BTN_LONG_PRESS : BTN_LONG_REPEAT;
+    }
+    return BTN_NO_PRESS;
+  }
+  
 private:
-    uint8_t    _longPressCount;
+  uint8_t    _longPressCount;
 };
 
 
 ExtButton button[numButtons] = { Next, Prev, VolP, VolM };
 
 /*
-	playAdvertisement
-		-does not work directly after setVolume!
-		
-		(busy, while playing regular track)
-		-> playAdvertisement()
-		-> Now idle.
-		-> Now busy (while playing advertisement)
-		-> Now idle. (when done with advertisement)
-		-> Now busy (resume track)
+  playAdvertisement
+    -does not work directly after setVolume!
+    
+    (busy, while playing regular track)
+    -> playAdvertisement()
+    -> Now idle.
+    -> Now busy (while playing advertisement)
+    -> Now idle. (when done with advertisement)
+    -> Now busy (resume track)
 
-		(nothing playing or regular track paused)
-		Return COM error 7, no playback
+    (nothing playing or regular track paused)
+    Return COM error 7, no playback
 */
 
 
@@ -595,10 +596,10 @@ bool g_bPaused = false;
 bool g_lastBusy = true;
 
 bool isPlaying() {
-	bool busy = !digitalRead(busyPin);
-	if (busy != g_lastBusy) Serial.println(busy ? F("Now busy.") : F("Now idle."));
-	g_lastBusy = busy;
-	return busy;
+  bool busy = !digitalRead(busyPin);
+  if (busy != g_lastBusy) Serial.println(busy ? F("Now busy.") : F("Now idle."));
+  g_lastBusy = busy;
+  return busy;
 }
 
 void waitForTrackToFinish() {
@@ -719,7 +720,7 @@ void changeVolume(char delta)
 void nextButton() {
   if (g_bPaused)
   {
-	light.off();
+  light.off();
     mp3.start();
     g_bPaused = false;
     disablestandbyTimer();
@@ -852,19 +853,19 @@ void forgetCurrentCard()
   g_bPaused = false;
 }
 
-const byte PCS_NO_CHANGE	 = 0; // no change detected since last pollCard() call
-const byte PCS_NEW_CARD 	 = 1; // card with new UID detected (had no card or other card before)
-const byte PCS_CARD_GONE     = 2;// card is not reachable anymore
-const byte PCS_CARD_IS_BACK  = 3;// card was gone, and is now back again
+const byte PCS_NO_CHANGE    = 0;  // no change detected since last pollCard() call
+const byte PCS_NEW_CARD     = 1;  // card with new UID detected (had no card or other card before)
+const byte PCS_CARD_GONE    = 2;  // card is not reachable anymore
+const byte PCS_CARD_IS_BACK = 3;  // card was gone, and is now back again
 
 
 byte pollCard()
 {
-	const byte maxRetries = 2;
+  const byte maxRetries = 2;
 
-	if (!hasCard)
+  if (!hasCard)
   {
-		if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial() && readCard(myCard))
+    if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial() && readCard(myCard))
     {
       bool bSameUID = !memcmp(lastCardUid, mfrc522.uid.uidByte, 4);
       Serial.print(F("IsSameAsLastUID="));
@@ -879,25 +880,25 @@ byte pollCard()
     }
     return PCS_NO_CHANGE;
   }
-	else // hasCard
-	{
+  else // hasCard
+  {
         // perform a dummy read command just to see whether the card is in range
-		byte buffer[18];
-		byte size = sizeof(buffer);
-		
-		if (mfrc522.MIFARE_Read(lastCardWasUL ? 8 : blockAddr, buffer, &size) != MFRC522::STATUS_OK)
+    byte buffer[18];
+    byte size = sizeof(buffer);
+    
+    if (mfrc522.MIFARE_Read(lastCardWasUL ? 8 : blockAddr, buffer, &size) != MFRC522::STATUS_OK)
     {
-			if (retries > 0)
+      if (retries > 0)
       {
-				retries--;
-			}
-			else
+        retries--;
+      }
+      else
       {
-				Serial.println(F("card gone"));
-				mfrc522.PICC_HaltA();
-				mfrc522.PCD_StopCrypto1();
-				hasCard = false;
-				return PCS_CARD_GONE;
+        Serial.println(F("card gone"));
+        mfrc522.PICC_HaltA();
+        mfrc522.PCD_StopCrypto1();
+        hasCard = false;
+        return PCS_CARD_GONE;
       }
     }
     else
@@ -905,7 +906,7 @@ byte pollCard()
         retries = maxRetries;
     }
   }
-	return PCS_NO_CHANGE;
+  return PCS_NO_CHANGE;
 }
 
 void handleCardReader()
@@ -919,7 +920,7 @@ void handleCardReader()
     lastCardPoll = now;
     switch (pollCard())
     {
-    case PCS_NEW_CARD:  
+    case PCS_NEW_CARD:
       g_bPaused = false;
       onNewCard();
       light.fade_off();
@@ -940,20 +941,20 @@ void handleCardReader()
       disablestandbyTimer();
       light.fade_off();
       break;
-    }    
+    }
   }
 }
 
 void sleepModeButton()
 {
-	mp3.playAdvertisement(5);
-	tracksLeftBeforePowerOff++;
+  mp3.playAdvertisement(5);
+  tracksLeftBeforePowerOff++;
 }
 
 
 void loop() {
 
-  isPlaying();
+  isPlaying();    // for logging
   light.periodic();
   checkStandbyAtMillis();
   mp3.loop();
@@ -976,12 +977,12 @@ void loop() {
   // playAdvertisement only works when regular track is playing already!
   switch (btnEv[VolP])
   {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); changeVolume(+3); 	 break;
-  case BTN_LONG_PRESS:  Serial.println(F("Vol+ long"));  					 break;
+  case BTN_SHORT_PRESS: Serial.println(F("Vol+ short")); changeVolume(+3);   break;
+  case BTN_LONG_PRESS:  Serial.println(F("Vol+ long"));            break;
   }
   switch (btnEv[VolM])
   {
-  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); changeVolume(-3); 	 break;
+  case BTN_SHORT_PRESS: Serial.println(F("Vol- short")); changeVolume(-3);   break;
   case BTN_LONG_PRESS:  Serial.println(F("Vol- long"));  powerOff();         break;
   }
   switch (btnEv[Prev])
@@ -1000,14 +1001,14 @@ void loop() {
 }
 
 void onNewCard()
-{    
+{
   if (myCard.cookie == cardCookie && myFolder->folder != 0 && myFolder->mode != Uninitialized)
   {
     playFolder();
   }
   else
-  { 
-	  // Neue Karte konfigurieren
+  {
+    // Neue Karte konfigurieren
     knownCard = false;
     mp3.playMp3FolderTrack(300);
     waitForTrackToFinish();
@@ -1015,81 +1016,41 @@ void onNewCard()
   }
 }
 
-void adminMenu() {
-  disablestandbyTimer();
-  mp3.pause();
-  Serial.println(F("=== adminMenu()"));
-  knownCard = false;
 
-  int subMenu = voiceMenu(11, 900, 900, false, false, 0, true);
-  if (subMenu == 0)
-    return;
-  if (subMenu == 1) {
-    resetCard();
-    return;
-  }
-  else if (subMenu == 2) {
-    // Maximum Volume
-    mySettings.maxVolume = voiceMenu(30, 930, 0, false, false, mySettings.maxVolume);
-  }
-  else if (subMenu == 3) {
-    // Minimum Volume
-    mySettings.minVolume = voiceMenu(30, 931, 0, false, false, mySettings.minVolume);
-  }
-  else if (subMenu == 4) {
-    // Initial Volume
-    mySettings.initVolume = voiceMenu(30, 932, 0, false, false, mySettings.initVolume);
-  }
-  else if (subMenu == 5) {
-    // EQ
-    mySettings.eq = voiceMenu(6, 920, 920, false, false, mySettings.eq);
-    mp3.setEq(static_cast<DfMp3_Eq>(mySettings.eq - 1));
-  }
-  else if (subMenu == 6) {
-    // create master card
-  }
-  else if (subMenu == 7) {
-    uint8_t shortcut = voiceMenu(4, 940, 940);
-    setupFolder(&mySettings.shortCuts[shortcut - 1]);
-    mp3.playMp3FolderTrack(400);
-  }
-  else if (subMenu == 8) {
-      const byte aStandbyTimer[] = { 5, 15, 30, 60, 0};	// TODO: PROGMEM
-      mySettings.standbyTimer = aStandbyTimer[voiceMenu(5, 960, 960) - 1];
-  }
-  else if (subMenu == 9) {
-    // Create Cards for Folder
-    // Ordner abfragen
-    nfcTagObject tempCard;
-    tempCard.cookie = cardCookie;
-    tempCard.version = 1;
-    tempCard.nfcFolderSettings.mode = 4;
-    tempCard.nfcFolderSettings.folder = voiceMenu(99, 301, 0, true);
-    uint8_t special = voiceMenu(mp3.getFolderTrackCount(tempCard.nfcFolderSettings.folder), 321, 0,
-                                true, tempCard.nfcFolderSettings.folder);
-    uint8_t special2 = voiceMenu(mp3.getFolderTrackCount(tempCard.nfcFolderSettings.folder), 322, 0,
-                                 true, tempCard.nfcFolderSettings.folder, special);
+void adminMenuCreateCardsForFolder()
+{
+  // Ordner abfragen
+  nfcTagObject tempCard;
+  tempCard.cookie = cardCookie;
+  tempCard.version = 1;
+  tempCard.nfcFolderSettings.mode = 4;
+  tempCard.nfcFolderSettings.folder = voiceMenu(99, 301, 0, true);
+  uint8_t special = voiceMenu(mp3.getFolderTrackCount(tempCard.nfcFolderSettings.folder), 321, 0,
+                              true, tempCard.nfcFolderSettings.folder);
+  uint8_t special2 = voiceMenu(mp3.getFolderTrackCount(tempCard.nfcFolderSettings.folder), 322, 0,
+                               true, tempCard.nfcFolderSettings.folder, special);
 
-    mp3.playMp3FolderTrack(936);
-    waitForTrackToFinish();
-    for (uint8_t x = special; x <= special2; x++) {
-      mp3.playMp3FolderTrack(x);
-      tempCard.nfcFolderSettings.special = x;
-      Serial.print(x);
-      Serial.println(F(" Karte auflegen"));
-      do {
-        readButtons();
-        if (btnEv[Prev] == BTN_SHORT_PRESS || btnEv[Next] == BTN_SHORT_PRESS)
-        {
-          Serial.println(F("Abgebrochen!"));
-          mp3.playMp3FolderTrack(802);
-          return;
-        }
-      } while (!mfrc522.PICC_IsNewCardPresent());
-
-      // RFID Karte wurde aufgelegt
-      if (!mfrc522.PICC_ReadCardSerial())
+  mp3.playMp3FolderTrack(936);
+  waitForTrackToFinish();
+  for (uint8_t x = special; x <= special2; x++)
+  {
+    mp3.playMp3FolderTrack(x);
+    tempCard.nfcFolderSettings.special = x;
+    Serial.print(x);
+    Serial.println(F(" Karte auflegen"));
+    do {
+      readButtons();
+      if (btnEv[Prev] == BTN_SHORT_PRESS || btnEv[Next] == BTN_SHORT_PRESS)
+      {
+        Serial.println(F("Abgebrochen!"));
+        mp3.playMp3FolderTrack(802);
         return;
+      }
+    } while (!mfrc522.PICC_IsNewCardPresent());
+
+    // RFID Karte wurde aufgelegt
+    if (mfrc522.PICC_ReadCardSerial())
+    {
       Serial.println(F("schreibe Karte..."));
       writeCard(tempCard);
       delay(100);
@@ -1098,19 +1059,76 @@ void adminMenu() {
       waitForTrackToFinish();
     }
   }
-  else if (subMenu == 10) {
-    // Invert Functions for Up/Down Buttons
+}
+
+
+void adminMenu() {
+  disablestandbyTimer();
+  mp3.pause();
+  Serial.println(F("=== adminMenu()"));
+  knownCard = false;
+
+  int subMenu = voiceMenu(11, 900, 900, false, false, 0, true);
+  switch (subMenu)
+  {
+  case 0:   // exit admin menu
+    return;
+    
+  case 1:   // configure card
+    resetCard();
+    return; // no config changes to store in EEPROM
+    
+  case 2:    // Maximum Volume
+    mySettings.maxVolume = voiceMenu(30, 930, 0, false, false, mySettings.maxVolume);
+    break;
+    
+  case 3:    // Minimum Volume
+    mySettings.minVolume = voiceMenu(30, 931, 0, false, false, mySettings.minVolume);
+    break;
+    
+  case 4:    // Initial Volume
+    mySettings.initVolume = voiceMenu(30, 932, 0, false, false, mySettings.initVolume);
+    break;
+    
+  case 5:    // EQ
+    mySettings.eq = voiceMenu(6, 920, 920, false, false, mySettings.eq);
+    mp3.setEq(static_cast<DfMp3_Eq>(mySettings.eq - 1));
+    break;
+    
+  case 6:    // create modifier card
+    // TODO
+    return; // no config changes to store in EEPROM
+  
+  case 7:
+    uint8_t shortcut = voiceMenu(4, 940, 940);
+    setupFolder(&mySettings.shortCuts[shortcut - 1]);
+    mp3.playMp3FolderTrack(400);
+    break;
+    
+  case 8:
+    const byte aStandbyTimer[] = { 5, 15, 30, 60, 0};	// TODO: PROGMEM
+    mySettings.standbyTimer = aStandbyTimer[voiceMenu(5, 960, 960) - 1];
+    break;
+    
+  case 9: // Create Cards for Folder
+    adminMenuCreateCardsForFolder();
+    return; // no config changes to store in EEPROM
+    
+  case 10:    // Invert Functions for Up/Down Buttons
     int temp = voiceMenu(2, 933, 933, false);
     mySettings.invertVolumeButtons = (temp == 2);
-  }
-  else if (subMenu == 11) {
+    break;
+    
+  case 11:
     Serial.println(F("Reset -> EEPROM wird gelöscht"));
     for (int i = 0; i < EEPROM.length(); i++) {
       EEPROM.update(i, 0);
     }
     resetSettings();
     mp3.playMp3FolderTrack(999);
+    break;
   }
+  
   writeSettingsToFlash();
   setstandbyTimer();
 }
@@ -1133,72 +1151,72 @@ uint8_t voiceMenu(int numberOfOptions, int startMessage, int messageOffset,
     readButtons();
     mp3.loop();
 
-	switch (btnEv[Next])
-	{
-	case BTN_SHORT_PRESS:
-        returnValue = min(returnValue + 1, numberOfOptions);
-        Serial.println(returnValue);
-        mp3.playMp3FolderTrack(messageOffset + returnValue);
-        if (preview) {
-          waitForTrackToFinish();
-          if (previewFromFolder == 0) {
-            mp3.playFolderTrack(returnValue, 1);
-          } else {
-            mp3.playFolderTrack(previewFromFolder, returnValue);
-          }
-          delay(1000);
-        }
-      break;
-      
-	case BTN_LONG_PRESS:
-      returnValue = min(returnValue + 10, numberOfOptions);
-      Serial.println(returnValue);
-      mp3.playMp3FolderTrack(messageOffset + returnValue);
+  switch (btnEv[Next])
+  {
+  case BTN_SHORT_PRESS:
+    returnValue = min(returnValue + 1, numberOfOptions);
+    Serial.println(returnValue);
+    mp3.playMp3FolderTrack(messageOffset + returnValue);
+    if (preview) {
       waitForTrackToFinish();
-	  break;
-	}
-	
-	switch (btnEv[Prev])
-	{
-	case BTN_SHORT_PRESS:
-        returnValue = max(returnValue - 1, 1);
-        Serial.println(returnValue);
-        mp3.playMp3FolderTrack(messageOffset + returnValue);
-        if (preview) {
-          waitForTrackToFinish();
-          if (previewFromFolder == 0) {
-            mp3.playFolderTrack(returnValue, 1);
-          }
-          else {
-            mp3.playFolderTrack(previewFromFolder, returnValue);
-          }
-          delay(1000);
-        }
-      break;
-	  
-	case BTN_LONG_PRESS:
-      returnValue = max(returnValue - 10, 1);
-      Serial.println(returnValue);
-      mp3.playMp3FolderTrack(messageOffset + returnValue);
-      waitForTrackToFinish();
-	  break;
-	}
-	
-	switch (btnEv[VolP])
-	{
-	case BTN_SHORT_PRESS:
-	  if (returnValue != 0) {
-		  Serial.print(F("=== "));
-		  Serial.print(returnValue);
-		  Serial.println(F(" ==="));
-		  return returnValue;
+      if (previewFromFolder == 0) {
+        mp3.playFolderTrack(returnValue, 1);
+      } else {
+        mp3.playFolderTrack(previewFromFolder, returnValue);
+      }
+      delay(1000);
     }
-	  delay(1000);
-	  break;
-	  
-	case BTN_LONG_PRESS:
-	  mp3.playMp3FolderTrack(802);
-	  return 0;
+    break;
+      
+  case BTN_LONG_PRESS:
+    returnValue = min(returnValue + 10, numberOfOptions);
+    Serial.println(returnValue);
+    mp3.playMp3FolderTrack(messageOffset + returnValue);
+    waitForTrackToFinish();
+    break;
+  }
+  
+  switch (btnEv[Prev])
+  {
+  case BTN_SHORT_PRESS:
+    returnValue = max(returnValue - 1, 1);
+    Serial.println(returnValue);
+    mp3.playMp3FolderTrack(messageOffset + returnValue);
+    if (preview) {
+      waitForTrackToFinish();
+      if (previewFromFolder == 0) {
+        mp3.playFolderTrack(returnValue, 1);
+      }
+      else {
+        mp3.playFolderTrack(previewFromFolder, returnValue);
+      }
+      delay(1000);
+    }
+    break;
+    
+  case BTN_LONG_PRESS:
+    returnValue = max(returnValue - 10, 1);
+    Serial.println(returnValue);
+    mp3.playMp3FolderTrack(messageOffset + returnValue);
+    waitForTrackToFinish();
+    break;
+  }
+  
+  switch (btnEv[VolP])
+  {
+  case BTN_SHORT_PRESS:
+    if (returnValue != 0) {
+      Serial.print(F("=== "));
+      Serial.print(returnValue);
+      Serial.println(F(" ==="));
+      return returnValue;
+    }
+    delay(1000);
+    break;
+    
+  case BTN_LONG_PRESS:
+    mp3.playMp3FolderTrack(802);
+    return 0;
     }
   } while (true);
 }
@@ -1210,7 +1228,7 @@ void resetCard() {
   
   mp3.playMp3FolderTrack(800);
   do {
-	  readButtons();
+    readButtons();
       if (btnEv[Prev] == BTN_SHORT_PRESS || btnEv[Next] == BTN_SHORT_PRESS) {
       Serial.print(F("Abgebrochen!"));
       mp3.playMp3FolderTrack(802);
@@ -1314,9 +1332,12 @@ bool readCard(nfcTagObject& nfcTag) {
 
   // Read data from the block
   Serial.print(F("Reading data from block "));
+  Serial.print(blockAddr);
+  Serial.println(F(" ..."));
+  
   if (!bIsMifareUL)
   {
-	// classic cards read 16 bytes at once
+    // classic cards read 16 bytes at once
     status = mfrc522.MIFARE_Read(blockAddr, buffer, &size);
     if (status != MFRC522::STATUS_OK) {
       Serial.print(F("MIFARE_Read() failed: "));
@@ -1453,7 +1474,7 @@ void writeCard(const nfcTagObject& nfcTag) {
 
 
 /**
-   Helper routine to dump a byte array as hex values to Serial.
+  Helper routine to dump a byte array as hex values to Serial.
 */
 void dump_byte_array(byte * buffer, byte bufferSize) {
   for (byte i = 0; i < bufferSize; i++) {
