@@ -231,7 +231,7 @@ Now busy.
     }
 #endif
     
-    if (tracksLeftBeforePowerOff > 0)
+    if (tracksLeftBeforePowerOff > 0) // TODO: not for announcements / admin menu
     {
       Serial.print(F("tracksLeftBeforePowerOff "));
       Serial.print((uint16_t)tracksLeftBeforePowerOff);
@@ -540,9 +540,10 @@ void checkStandbyAtMillis() {
 // bitmasks to create ButtonEventID
 const byte NoEvent      = 0x00;
 const byte AllThree     = 0x01;  // buttons 1-3 are pressed, then released
-const byte ShortPress   = 0x48;  // button was shortly pressed and then released
-const byte LongPress    = 0x50;  // button is pressed for a while and still pressed after LONG_PRESS duration
-const byte LongRepeat   = 0x58;  // button has been pressed for another LONG_PRESS duration
+const byte ShortPress   = 0x08;  // button was shortly pressed and then released
+const byte LongPress    = 0x10;  // button is pressed for a while and still pressed after LONG_PRESS duration
+const byte LongRepeat   = 0x20;  // button has been pressed for another LONG_PRESS duration
+const byte OnPress      = 0x40;  // button just changed to pressed
 
 typedef uint8_t ButtonEvt; // ButtonID + bitmask
 
@@ -550,28 +551,31 @@ typedef uint8_t ButtonEvt; // ButtonID + bitmask
 class ExtButton : public Button
 {
 public:
-  ExtButton(ButtonID id) : Button(aButtonPin[id]), _id(id), _longPressCount(1) {};
+  ExtButton(ButtonID id) : Button(aButtonPin[id]), _longPressCount(1) {};
 
   ButtonEvt readEvent()
   {
     read();
-    if (wasPressed()) _longPressCount = 0;
+    if (wasPressed())
+    {
+      _longPressCount = 0;
+      return OnPress;
+    }
     
     if (wasReleased())
     {
       bool bShort = (_longPressCount == 0);
       _longPressCount = 1;  // use 1 as marker to not send event
-      if (bShort) return (_id | ShortPress);
+      if (bShort) return ShortPress;
     }
     if (pressedFor(static_cast<uint16_t>(_longPressCount + 1) * LONG_PRESS))
     {
-      return _id | ((_longPressCount++ == 0) ? LongPress : LongRepeat);
+      return (_longPressCount++ == 0) ? LongPress : LongRepeat;
     }
     return NoEvent;
   }
   
 private:
-  const ButtonID  _id;
   uint8_t         _longPressCount;
 };
 
@@ -586,7 +590,7 @@ ExtButton button[numButtons] = { Next, Prev, VolP, VolM };
     -> playAdvertisement()
     -> Now idle.
     -> Now busy (while playing advertisement)
-    -> Now idle. (when done with advertisement)
+    -> Now idle.(when done with advertisement)
     -> Now busy (resume track)
 
     (nothing playing or regular track paused)
@@ -602,17 +606,78 @@ struct ButtonHandler
     _buttonsPressed = 0;
     for (uint8_t i = 0; i < numButtons; i++)
     {
-      ButtonEvt evt = button[i].readEvent();
+      _btnEv[i] = button[i].readEvent();
       if (button[i].isPressed()) _buttonsPressed++;
-      
-      if (evt != NoEvent)
+    }
+    /*
+    for (uint8_t i = 0; i < numButtons; i++)
+    {
+      if (_btnEv[i] != 0)
       {
-        Serial.print(F("Single button event "));
-        Serial.println(evt, HEX);
-        return evt;
+        Serial.print(F("Button "));
+        Serial.print(i);
+        Serial.print(F(" has code "));
+        Serial.print(_btnEv[i], HEX);
+        Serial.print(F(" while "));
+        Serial.print(_buttonsPressed);
+        Serial.println(F(" other is pressed."));        
       }
-      if (_buttonsPressed == 3)
+    }
+    */
+    
+    //Serial.print(F("_waitUntilAllReleased "));
+    //Serial.print(_waitUntilAllReleased);
+    //Serial.print(F(" _buttonsPressed "));
+    //Serial.println(_buttonsPressed);
+    
+    //delay(100);
+    
+    if (_waitUntilAllReleased && _buttonsPressed != 0) return;
+    _waitUntilAllReleased = false;
+    
+    for (uint8_t i = 0; i < numButtons; i++)
+    {
+      if ((_btnEv[i] & OnPress) && _buttonsPressed == 0)
       {
+        _firstButton = i;
+      }
+        
+      if ((_btnEv[i] & ShortPress) && _buttonsPressed == 0)
+      {
+        Serial.print(F("Single button event (short)"));
+        Serial.println(_btnEv[i] | i, HEX);
+        return _btnEv[i] | i;
+      }
+      
+      if ((_btnEv[i] & (LongPress | LongRepeat)) && _buttonsPressed == 1)
+      {
+        Serial.print(F("Single button event (long)"));
+        Serial.println(_btnEv[i] | i, HEX);
+        return _btnEv[i] | i;
+      }
+      
+      // Press one buttons + a second one (shortly)
+      // Two button: ShortPress of 2nd button is triggered after release, -> only 1 is still pressed
+      if ((_btnEv[i] & ShortPress) && _buttonsPressed == 1)
+      {
+        Serial.print(F("Two button event (short) "));
+        Serial.print(_firstButton);
+        Serial.print(F(" plus "));
+        Serial.println(i);
+        _waitUntilAllReleased = true;
+      }
+      // Press one buttons + a second one (hold)
+      if ((_btnEv[i] & (LongPress | LongRepeat)) && _buttonsPressed == 2)
+      {
+        Serial.print(F("Two button event (long) "));
+        Serial.println(_firstButton);
+        Serial.print(F(" plus "));
+        Serial.println(i);
+        _waitUntilAllReleased = true;
+      }
+      if ((_btnEv[i] & (LongPress | LongRepeat)) && _buttonsPressed == 3)
+      {
+        Serial.print(F("AllThree button event "));
         _waitUntilAllReleased = true;
         return AllThree;
       }
@@ -620,6 +685,7 @@ struct ButtonHandler
     return NoEvent;
   }
   
+  byte      _firstButton;
   byte      _btnEv[numButtons] = {0};
   uint8_t   _buttonsPressed;
   bool      _waitUntilAllReleased;
@@ -987,6 +1053,8 @@ void loop()
   checkStandbyAtMillis();
   mp3.loop();
   
+  buttons.read();
+  /*
   switch (buttons.read())
   {
   case VolP | ShortPress: Serial.println(F("Vol+ short")); changeVolume(+3);   break;
@@ -1002,7 +1070,7 @@ void loop()
     forgetCurrentCard();
     adminMenu();
   }
-  
+  */
   handleCardReader();
 }
 
