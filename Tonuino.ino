@@ -539,11 +539,13 @@ void checkStandbyAtMillis() {
 
 // bitmasks to create ButtonEventID
 const byte NoEvent      = 0x00;
-const byte AllThree     = 0x01;  // buttons 1-3 are pressed, then released
+const byte AllThreeLong = 0x01;  // buttons 1-3 are pressed and held for LONG_PRESS duration
 const byte ShortPress   = 0x08;  // button was shortly pressed and then released
 const byte LongPress    = 0x10;  // button is pressed for a while and still pressed after LONG_PRESS duration
 const byte LongRepeat   = 0x20;  // button has been pressed for another LONG_PRESS duration
 const byte OnPress      = 0x40;  // button just changed to pressed
+const byte TwoButtonCombo = 0x80;
+const byte As2nd        = 3;
 
 typedef uint8_t ButtonEvt; // ButtonID + bitmask
 
@@ -599,7 +601,7 @@ ExtButton button[numButtons] = { Next, Prev, VolP, VolM };
 
 struct ButtonHandler
 {
-  ButtonHandler() : _buttonsPressed(0), _waitUntilAllReleased(false) {}
+  ButtonHandler() : _firstButton(0), _buttonsPressed(0), _waitUntilNPressed(0), _ignoreSingleButtonEvents(false) {}
   
   ButtonEvt read()
   {
@@ -632,26 +634,31 @@ struct ButtonHandler
     
     //delay(100);
     
-    if (_waitUntilAllReleased && _buttonsPressed != 0) return;
-    _waitUntilAllReleased = false;
+    //if (_waitUntilAllReleased && _buttonsPressed != 0) return;
+    //_waitUntilAllReleased = false;
     
+    if (_waitUntilNPressed > 0 && _waitUntilNPressed < _buttonsPressed) return;
+    _waitUntilNPressed = 0;
+        
+    if (_buttonsPressed == 0) _ignoreSingleButtonEvents = false;
+        
     for (uint8_t i = 0; i < numButtons; i++)
     {
-      if ((_btnEv[i] & OnPress) && _buttonsPressed == 0)
+      if ((_btnEv[i] & OnPress) && _buttonsPressed == 1)
       {
         _firstButton = i;
       }
         
-      if ((_btnEv[i] & ShortPress) && _buttonsPressed == 0)
+      if ((_btnEv[i] & ShortPress) && _buttonsPressed == 0 && !_ignoreSingleButtonEvents)
       {
-        Serial.print(F("Single button event (short)"));
+        Serial.print(F("Single button event (short) "));
         Serial.println(_btnEv[i] | i, HEX);
         return _btnEv[i] | i;
       }
       
-      if ((_btnEv[i] & (LongPress | LongRepeat)) && _buttonsPressed == 1)
+      if ((_btnEv[i] & (LongPress | LongRepeat)) && _buttonsPressed == 1 && !_ignoreSingleButtonEvents)
       {
-        Serial.print(F("Single button event (long)"));
+        Serial.print(F("Single button event (long) "));
         Serial.println(_btnEv[i] | i, HEX);
         return _btnEv[i] | i;
       }
@@ -663,32 +670,47 @@ struct ButtonHandler
         Serial.print(F("Two button event (short) "));
         Serial.print(_firstButton);
         Serial.print(F(" plus "));
-        Serial.println(i);
-        _waitUntilAllReleased = true;
+        Serial.print(i);
+        Serial.print(F(" "));
+        _ignoreSingleButtonEvents = true;
+        uint8_t code = TwoButtonCombo | _firstButton | (i << As2nd);
+        Serial.println(code, HEX);
+        return code;
       }
+      /*
       // Press one buttons + a second one (hold)
       if ((_btnEv[i] & (LongPress | LongRepeat)) && _buttonsPressed == 2)
       {
         Serial.print(F("Two button event (long) "));
         Serial.println(_firstButton);
         Serial.print(F(" plus "));
-        Serial.println(i);
+        _waitUntilNPressed = 1;
         _waitUntilAllReleased = true;
       }
-      if ((_btnEv[i] & (LongPress | LongRepeat)) && _buttonsPressed == 3)
+      */
+      if ((_btnEv[i] & LongPress) && _buttonsPressed == 3)
       {
-        Serial.print(F("AllThree button event "));
-        _waitUntilAllReleased = true;
-        return AllThree;
+        Serial.println(F("AllThreeLong button event "));
+        _waitUntilNPressed = 0;
+        return AllThreeLong;
       }
     }
+    
+    // if release order is wrong, ignore further events until all buttons released
+    if (_buttonsPressed > 0 && !button[_firstButton].isPressed())
+    {
+      _waitUntilNPressed = 0;
+    }
+    
     return NoEvent;
   }
   
   byte      _firstButton;
   byte      _btnEv[numButtons] = {0};
   uint8_t   _buttonsPressed;
-  bool      _waitUntilAllReleased;
+  //bool      _waitUntilAllReleased;
+  bool      _ignoreSingleButtonEvents;
+  uint8_t   _waitUntilNPressed;   // if > 0, no events are fired until number of pressed buttons is <= _waitUntilNPressed
 };
 
 ButtonHandler buttons;
