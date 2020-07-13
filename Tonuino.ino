@@ -628,9 +628,9 @@ static void previousTrack() {
 MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522
 MFRC522::MIFARE_Key key;
 bool successRead;
-byte sector = 1;
-byte blockAddr = 4;
-byte trailerBlock = 7;
+const byte sector = 1;
+const byte blockAddr = 4;
+const byte trailerBlock = 7;
 MFRC522::StatusCode status;
 
 #define buttonPause A0
@@ -894,7 +894,7 @@ void playFolder() {
   }
   // Spezialmodus Von-Bin: Hörspiel: eine zufällige Datei aus dem Ordner
   if (myFolder->mode == 7) {
-    Serial.println(F("Spezialmodus Von-Bin: Hörspiel -> zufälligen Track wiedergeben"));
+    Serial.println(F("Spezialmodus Von-Bis: Hörspiel -> zufälligen Track wiedergeben"));
     Serial.print(myFolder->special);
     Serial.print(F(" bis "));
     Serial.println(myFolder->special2);
