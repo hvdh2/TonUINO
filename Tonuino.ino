@@ -535,10 +535,10 @@ static void nextTrack(uint16_t track) {
       mp3.playFolderTrack(myFolder->folder, currentTrack);
       Serial.print(F("Albummodus ist aktiv -> nächster Track: "));
       Serial.print(currentTrack);
-    } else
+    } else {
       //      mp3.sleep();   // Je nach Modul kommt es nicht mehr zurück aus dem Sleep!
       setstandbyTimer();
-    { }
+    }
   }
   if (myFolder->mode == 3 || myFolder->mode == 9) {
     if (currentTrack != numTracksInFolder - firstTrack + 1) {
