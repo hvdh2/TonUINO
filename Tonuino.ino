@@ -557,20 +557,6 @@ void playCurrentTrack()
   mp3.playFolderTrack(myFolder->folder, queue[currentQueueIndex]);
 }
 
-void queueIndexBackClamp()
-{
-  if (currentQueueIndex > 0) currentQueueIndex--;
-}
-
-
-// return true if at end
-bool queueIndexForwardClamp()
-{
-  if (currentQueueIndex < queueSize - 1) return true;
-  currentQueueIndex++;
-  return false;
-}
-
 
 // Leider kann das Modul selbst keine Queue abspielen, daher müssen wir selbst die Queue verwalten
 static void nextTrack(uint16_t track) {
@@ -600,24 +586,23 @@ static void nextTrack(uint16_t track) {
   case 1: //Hoerspiel
   case 7: //HoerspielRandom
   case 4: //EinzelTitel
-    bStop = true;
+    bStop = true;   // Stop am Ende des Titels
     break;
     
   case 2: //Album
   case 8: //SpezialVonBis
-    bStop = queueIndexForwardClamp();
+  case 5: //Hoerbuch
+    bStop = (currentQueueIndex < queueSize - 1);  // Stop am Ende der Queue
+    if (!bStop) currentQueueIndex++;
+    // Bei Hörbuch: Fortschritt im EEPROM abspeichern oder bei Ende zurücksetzen 
+    if (myFolder->mode == 5)
+      EEPROM.update(myFolder->folder, bStop ? 1 : queue[currentQueueIndex]);
     break;
     
   case 3: //Party
   case 9: //PartyRandom
     // nächster Queue-Eintrag. Beim Ende springe zum Start.
-    currentQueueIndex = (currentQueueIndex == queueSize - 1) ? (currentQueueIndex + 1) : 0;
-    break;
-
-  case 5: //Hoerbuch
-    bStop = queueIndexForwardClamp();
-    // Fortschritt im EEPROM abspeichern oder bei Ende zurücksetzen 
-    EEPROM.update(myFolder->folder, bStop ? 1 : queue[currentQueueIndex]);
+    currentQueueIndex = (currentQueueIndex < queueSize - 1) ? (currentQueueIndex + 1) : 0;
     break;
 
   default:
@@ -649,10 +634,14 @@ static void previousTrack() {
       Serial.println(F("Hörspielmodus ist aktiv -> Track von vorne spielen"));
       break;
     */
-  case 2:
-  case 8:
+  case 2: //Album
+  case 8: //SpezialVonBis
+  case 5: //Hörbuch
     Serial.println(F("Albummodus ist aktiv -> vorheriger Track"));
-    queueIndexBackClamp();
+    if (currentQueueIndex > 0) currentQueueIndex--;
+    // Bei Hörbuch Fortschritt speichern
+    if (myFolder->mode == 5)
+      EEPROM.update(myFolder->folder, queue[currentQueueIndex]);
     break;
   
   case 3: // Party
@@ -665,13 +654,6 @@ static void previousTrack() {
     Serial.println(F("Einzel Modus aktiv -> Track von vorne spielen"));
     break;
   
-  case 5:
-    Serial.println(F("Hörbuch Modus ist aktiv -> vorheriger Track und "
-                     "Fortschritt speichern"));
-    queueIndexBackClamp();
-    EEPROM.update(myFolder->folder, queue[currentQueueIndex]);  // Fortschritt im EEPROM abspeichern
-    break;
-
   default:  
     return; // do nothing
   }
